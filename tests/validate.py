@@ -78,7 +78,8 @@ def check_references():
         for conf in CONFIDENCES:
             if conf not in rubric:
                 fail(f"rubric.md: confidence {conf!r} not defined")
-        for heading in ("## Severity", "## Confidence", "## Finding format"):
+        for heading in ("## Severity", "## Confidence", "## Finding format",
+                        "## One defect matching several checklist rows"):
             if heading not in rubric:
                 fail(f"rubric.md: missing section {heading!r}")
 

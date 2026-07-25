@@ -68,10 +68,18 @@ class RateCache:
         self._rates = {}
 
     def rate(self, currency):
+        # The lock guards the dict, not the network call. Holding it across _fetch would serialise
+        # every reader behind one request, and a hung fetch would block the lot indefinitely.
         with self._lock:
-            if currency not in self._rates:
-                self._rates[currency] = self._fetch(currency)
-            return self._rates[currency]
+            if currency in self._rates:
+                return self._rates[currency]
+
+        value = self._fetch(currency)
+
+        # Two threads racing on a cold cache may both fetch; setdefault makes the first writer win
+        # so they still agree on the result. A duplicate request is cheaper than a stalled pool.
+        with self._lock:
+            return self._rates.setdefault(currency, value)
 
     def start_refresh(self, currencies):
         threads = [

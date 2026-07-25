@@ -77,6 +77,35 @@ Anti-patterns in findings:
 - A fix that is a diff. Diffs get applied without thought; see `agent-prompt.md`.
 - A finding with no location. If it cannot be located it cannot be verified or fixed.
 
+## One defect matching several checklist rows
+
+Checklist rows overlap by design — a data-flow row and a sink row will both match the same line.
+Three rules, and the third is the one that decides:
+
+1. **One defect is one finding**, however many rows match it. Emitting `F3` and `F4` for the same
+   line inflates the count and makes the report look worse than the code is.
+2. **Attribute to the most specific row** — the one naming the sink or the consequence — and list
+   the others on the same line so provenance is not lost:
+
+   ```
+   [F2] High · Confirmed · app/Http/Users.php:88 · PHP-05 (also PHP-01)
+   ```
+
+3. **Unless the rows imply different fixes, in which case they are separate findings.** This is the
+   test to apply, not a judgement call about which row feels primary. If closing one row leaves the
+   other's row still open, the reader has two pieces of work and needs two entries.
+
+Worked examples:
+
+| Rows matched | Same fix? | Result |
+|---|---|---|
+| `VT-05` prop crossing a trust boundary + `VT-01` reaching `v-html` | Yes — stop rendering it as HTML and both close | One finding, `VT-01 (also VT-05)` |
+| `PHP-01` superglobal into a sink + `PHP-05` SQL by concatenation | Yes — bind the parameter and both close | One finding, `PHP-05 (also PHP-01)` |
+| `GEN-01` mishandled boundary + `GEN-07` that boundary is untested | **No** — fixing the branch does not add the test, and the test is what stops it regressing | Two findings |
+
+The same rule governs the agent prompt block: one block entry per finding, so a merged finding
+produces one entry and one row in the status table.
+
 ## Merging findings from multiple skills
 
 When an entry-point skill delegated to more than one language skill:

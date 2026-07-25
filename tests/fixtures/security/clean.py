@@ -156,7 +156,16 @@ def restore_prefs(request):
 
 
 def _is_public_host(host):
-    """Resolve the host and refuse anything that is not a public unicast address."""
+    """Resolve the host and refuse anything that is not a public unicast address.
+
+    Note what this does *not* give you: the address checked here and the address the HTTP client
+    later connects to are two independent resolutions, so a host whose DNS an attacker controls can
+    answer once with a public address and again with 169.254.169.254. Closing that gap means
+    pinning the address -- resolve once, connect to that IP, and pass the hostname through the Host
+    header and TLS SNI -- which needs a custom connection adapter rather than a bare requests.get.
+    The allow-list below is what makes the residual risk acceptable here: an attacker would already
+    need control of a host we ship in AVATAR_HOST_ALLOWLIST.
+    """
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
@@ -172,9 +181,10 @@ def _is_public_host(host):
 @app.require_auth
 @app.route("/fetch-avatar")
 def fetch_avatar(request):
-    # SEC-06: scheme and host are checked against an allow-list, the resolved address is confirmed
-    # public so a DNS entry pointing at 169.254.169.254 is refused, and redirects are not followed
-    # so the check cannot be bypassed after the fact.
+    # SEC-06: three layers, in order of how much they actually buy. The host allow-list is the one
+    # doing the real work; the public-address check catches an allow-listed host that starts
+    # resolving somewhere internal; not following redirects stops a 302 from walking the request
+    # somewhere the first two checks never saw. See _is_public_host for what remains open.
     parsed = urlparse(request.args.get("url", ""))
 
     if parsed.scheme != "https" or parsed.hostname not in AVATAR_HOST_ALLOWLIST:

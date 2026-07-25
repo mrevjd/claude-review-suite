@@ -106,6 +106,19 @@ not run.
 To test the crash path specifically — which is the dangerous one — put a syntax error in a file and
 confirm the report distinguishes "the tool found problems" from "the tool could not run".
 
+## Last manual run — 2026-07-25
+
+| Criterion | Result |
+|---|---|
+| 1. Severity accuracy | **Weak pass.** All 41 planted IDs locatable with defensible severity — but run by the fixtures' own author, so it does not show that the checklists lead an unprimed reviewer to the defects. Re-run blind before trusting it. |
+| 2. False positives | **Pass.** Zero Critical and zero High across all six clean fixtures. Two Mediums found and since fixed: a lock held across a network call in `general/clean.py`, and a `security/clean.py` comment claiming SSRF protection stronger than the code provided. |
+| 3. Trigger behaviour | **Not run.** Needs the plugin installed and a fresh session per phrasing. `check_trigger_distinctness` only proves the descriptions cannot contend on language tokens. |
+| 4. Tools absent | **Pass.** Under `PATH=/usr/bin:/bin` (17 of 21 tools hidden), every missing linter became a `SKIP` with its reason, exit stayed 0, and no absent check was reported as passing. |
+
+Criterion 1 also surfaced a gap the validator cannot see: one defect frequently matches two checklist
+rows, and nothing said how to attribute it. `references/rubric.md` now carries the rule ("One defect
+matching several checklist rows"), keyed on whether the rows imply the same fix.
+
 ## Adding a checklist row
 
 The validator enforces the loop, so the order matters:
