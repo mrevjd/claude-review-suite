@@ -318,6 +318,122 @@ def check_checklist_coverage():
             fail(f"{FIXTURE_DIRS[name]}: plants {stray}, which {name} does not declare")
 
 
+VULN_RE = re.compile(r"VULN:\s*((?:GO|SH|VT|PHP|GEN|SEC)-\d\d)")
+COMMENT_PREFIXES = {
+    ".sh": ("#",),
+    ".py": ("#",),
+    ".go": ("//",),
+    ".ts": ("//",),
+    ".php": ("//", "#"),
+    ".vue": ("//", "<!--"),
+}
+ANCHOR_RE_PRESENT = re.compile(r"(?<!-)\bANCHOR:\s*(?P<anchor>\S.*?)\s*$")
+ANCHOR_RE_ABSENT = re.compile(r"\bANCHOR-ABSENT:\s*(?P<anchor>\S.*?)\s*$")
+
+
+def check_vuln_anchors():
+    """The comment is not the defect. Every `VULN: <ID>` must carry an anchor naming the defective
+    construct, and that anchor must still hold against the code.
+
+    Without this, `check_checklist_coverage` passes on a fixture whose defect has been quietly
+    fixed -- the annotation survives the edit that removes the vulnerability, so coverage is
+    asserted against a comment rather than against code. That is exactly the silent gap this suite
+    tells reviewers to look for, and it lived in this validator until 2026-07-25.
+
+    Two forms, because not every defect is a construct you can point at:
+
+      ANCHOR:        <literal>   the defective construct; must still appear
+      ANCHOR-ABSENT: <literal>   the guard whose absence *is* the defect; must not appear
+
+    A planted omission -- no `set -euo pipefail`, no CSRF header, no bounds check -- has nothing to
+    match, so anchoring it positively is impossible. ANCHOR-ABSENT inverts the assertion and fails
+    the moment someone adds the missing guard without removing the annotation.
+
+    Anchoring by content rather than line number is the same rule `references/agent-prompt.md`
+    imposes on every finding the suite emits.
+
+    The honest limit: an anchor catches a defect that was *removed or rewritten*, which is the
+    realistic drift. It cannot catch a fix that leaves the anchored text in place and neutralises
+    it elsewhere -- adding an early return above an anchored dereference, say. That residue is what
+    the differential tests are for."""
+    for name in SKILLS:
+        fixture_dir = ROOT / FIXTURE_DIRS[name]
+        if not fixture_dir.is_dir():
+            continue
+        for path in sorted(fixture_dir.glob("vulnerable*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(ROOT)
+            lines = path.read_text(encoding="utf-8").splitlines()
+
+            # An anchor literal would trivially match its own annotation, so the haystack is the
+            # file with every anchor line removed.
+            haystack = "\n".join(
+                l for l in lines if "ANCHOR:" not in l and "ANCHOR-ABSENT:" not in l)
+
+            # Absence is asserted against code only. A fixture that plants "no `set -euo pipefail`"
+            # names the missing guard in its own prose -- that is the annotation doing its job, not
+            # the guard being present, and matching against comments would fail every such row.
+            prefixes = COMMENT_PREFIXES.get(path.suffix, ("#",))
+            code_only = "\n".join(
+                l for l in haystack.splitlines()
+                if not l.strip().startswith(prefixes))
+
+            for idx, line in enumerate(lines):
+                vuln = VULN_RE.search(line)
+                if not vuln:
+                    continue
+                vid = vuln.group(1)
+
+                # The anchor follows the VULN block; scan forward past the rest of a wrapped
+                # comment, stopping at the next VULN annotation.
+                anchor, absent = None, False
+                for ahead in lines[idx + 1:idx + 10]:
+                    if VULN_RE.search(ahead):
+                        break
+                    gone = ANCHOR_RE_ABSENT.search(ahead)
+                    if gone:
+                        anchor, absent = gone.group("anchor"), True
+                        break
+                    found = ANCHOR_RE_PRESENT.search(ahead)
+                    if found:
+                        anchor = found.group("anchor")
+                        break
+
+                if anchor is None:
+                    fail(f"{rel}: {vid} has no ANCHOR:/ANCHOR-ABSENT: line, so nothing proves the "
+                         f"defect still exists -- fixing the code would leave this annotation "
+                         f"passing")
+                    continue
+                if len(anchor) < 8:
+                    fail(f"{rel}: {vid} anchor {anchor!r} is too short to be distinctive")
+                    continue
+                # An anchor that also appears in the clean counterpart is true of the *correct*
+                # version, so it can never detect the defect being fixed. VT-05 shipped with
+                # exactly that bug -- it anchored a `defineProps<...>` line byte-identical in
+                # clean.vue, because its defect is the absence of validation rather than the
+                # presence of any construct -- and a blind review caught it by applying the real
+                # fix and watching this validator stay green.
+                if not absent:
+                    for clean_path in sorted(fixture_dir.glob("clean*")):
+                        if not clean_path.is_file():
+                            continue
+                        clean_body = "\n".join(
+                            l for l in clean_path.read_text(encoding="utf-8").splitlines()
+                            if "ANCHOR" not in l)
+                        if anchor in clean_body:
+                            fail(f"{rel}: {vid} anchor {anchor!r} also appears in "
+                                 f"{clean_path.name}, so it is true of the corrected code and "
+                                 f"cannot detect this defect being fixed")
+
+                if absent and anchor in code_only:
+                    fail(f"{rel}: {vid} is annotated as a missing {anchor!r}, but that now appears "
+                         f"in the file -- the guard was added and the annotation was not removed")
+                elif not absent and anchor not in haystack:
+                    fail(f"{rel}: {vid} anchor {anchor!r} no longer appears in the file -- the "
+                         f"planted defect was changed or removed but its annotation was not")
+
+
 LANGUAGE_SKILLS = ["review-go", "review-bash", "review-vue-ts", "review-php"]
 LANGUAGE_TOKENS = {
     "review-go": [r"\bGo\b", r"\.go\b"],
@@ -401,7 +517,7 @@ def check_installer_is_suggested_not_run():
 
 CHECKS = [check_manifests, check_references, check_agent_prompt_parses,
           check_skill_frontmatter, check_tool_probes, check_checklist_coverage,
-          check_delegation, check_trigger_distinctness,
+          check_vuln_anchors, check_delegation, check_trigger_distinctness,
           check_installer_is_suggested_not_run]
 
 
