@@ -17,6 +17,7 @@ def page_of(rows, page, per_page):
     # VULN: GEN-01 -- the start bound treats page as 0-indexed (page * per_page instead of
     # (page - 1) * per_page), so page 1 skips an entire page of rows; the end bound is separately
     # off by one element past the window.
+    # ANCHOR: start = page * per_page
     start = page * per_page
     end = start + per_page + 1
     return rows[start:end]
@@ -31,6 +32,7 @@ def load_settings(path):
         # VULN: GEN-02 -- every failure is flattened into "no settings". A missing file, a
         # permission error and a syntax error in the JSON are indistinguishable from a genuinely
         # empty config, so a misdeployed file silently runs the app on defaults.
+        # ANCHOR: except Exception:
         pass
     return {}
 
@@ -45,6 +47,7 @@ def export_invoices(path, invoices):
         if invoice.get("total") is None:
             # VULN: GEN-03 -- early return leaves the file handle open, and on an interpreter
             # without refcounting semantics the buffered rows are never flushed either.
+            # ANCHOR: handle = open(path, "w", encoding="utf-8", newline="")
             return written
         writer.writerow([invoice["id"], invoice["total"]])
         written += 1
@@ -61,6 +64,7 @@ def cached_rate(currency, fetch):
     # lock, so two threads racing on a cold cache can both see currency missing and both call
     # fetch; whichever store runs last silently overwrites the other, so two callers can end up
     # holding different objects for what is supposed to be the same cached value.
+    # ANCHOR: _rate_cache[currency] = fetch(currency)
     if currency not in _rate_cache:
         _rate_cache[currency] = fetch(currency)
     return _rate_cache[currency]
@@ -77,6 +81,7 @@ def overdue_invoices(invoices):
         # VULN: GEN-05 -- the docstring promises a list and every caller iterates the result, but
         # this branch returns None, so an empty input raises TypeError in the caller instead of
         # iterating zero times.
+        # ANCHOR: return None
         return None
     return [i for i in invoices if i.get("days_late", 0) > 0]
 
@@ -92,6 +97,7 @@ def statement_total(invoice):
     # VULN: GEN-06 -- the same processing fee rule duplicated from invoice_total, and the copies
     # have already drifted: 2.9% + 30 there, 2.9% + 25 here. One of them is wrong and nothing
     # says which.
+    # ANCHOR: fee = subtotal * 0.029 + 25
     fee = subtotal * 0.029 + 25
     return subtotal + fee + subtotal * TAX_RATE
 
@@ -101,6 +107,7 @@ def shipping_band(weight_grams):
     # VULN: GEN-07 -- weight_grams has no lower-bound check, so a scale reporting a zero or
     # negative reading (a fault, not a real parcel) is silently priced as "light" like any small
     # package, and nothing pins what a non-positive reading should do.
+    # ANCHOR-ABSENT: weight_grams <= 0
     if weight_grams < 1000:
         return "light"
     if weight_grams < 20000:

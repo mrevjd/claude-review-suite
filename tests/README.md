@@ -26,16 +26,69 @@ standard library.
 | `check_skill_frontmatter` | Every skill has exactly `name` + `description`, frontmatter within 1024 chars, name matching its directory, a description starting with "Use when" and written in third person outside quoted trigger phrases, links to all three reference documents, a "Checks skipped" requirement, and no dangling reference paths. |
 | `check_tool_probes` | Every skill lists exactly the tools the design assigns it, with a `command -v` probe line. |
 | `check_checklist_coverage` | **Precondition for criterion 1.** Every checklist row a skill declares is planted in one of that skill's vulnerable fixtures; every planted ID belongs to the skill that owns the fixture directory; every cross-referenced ID exists; every fixture directory has a clean counterpart. |
+| `check_vuln_anchors` | **The comment is not the defect.** Every `VULN: <ID>` carries an `ANCHOR:` line naming the defective construct, which must still appear in the file — or an `ANCHOR-ABSENT:` line naming the guard whose absence *is* the defect, which must not. A positive anchor may not also appear in the clean counterpart, since a literal true of the corrected code can never detect the defect being fixed. Fixing a plant without removing its annotation fails here. |
 | `check_delegation` | Both entry points delegate to all four language skills, state how findings merge, and use no `@` path links. |
 | `check_trigger_distinctness` | **Precondition for criterion 3.** Language skills name their language; entry-point descriptions contain no language token; security intent words appear only in `security-review`. |
 
-`tests/run.sh` adds real-tool checks over the fixtures — `gofmt`, `shellcheck`, `bash -n`, `php -l`,
-`py_compile`, `node --check` — so a vulnerable fixture is confirmed *vulnerable* rather than merely
-broken. Every tool that is not installed is reported as `SKIP` with its reason. A check with no
-fixtures to run against is also a skip, never a pass.
+`tests/run.sh` adds real-tool checks over the fixtures — `gofmt`, `go build`, `go vet`, `shellcheck`,
+`bash -n`, `php -l`, `py_compile`, `node --check` — plus a **differential suite per language**. Every
+tool that is not installed is reported as `SKIP` with its reason. A check with no fixtures to run
+against is also a skip, never a pass.
 
-What the validator does **not** prove: that a review finds the planted defects, scores them
-correctly, or stays quiet on the clean fixtures. Those need an agent.
+### Anchors and differentials are a pair
+
+Neither half is sufficient alone, and it is worth being precise about which failure each catches:
+
+| | Catches | Misses |
+|---|---|---|
+| `check_vuln_anchors` | The planted construct was deleted or rewritten — the realistic drift when someone tidies a fixture. | A fix that leaves the anchored text in place and neutralises it elsewhere (an early `return` added above an anchored dereference). |
+| Differential tests | Any change that stops the fixture *behaving* defectively, however it was made. | Rows whose defect is not observable by running the code — see the coverage table below. |
+
+Differential coverage. **Every "covered" claim below was established by mutation** — applying a
+correct fix and watching the suite go red — not by inspection. That distinction is not pedantic: an
+earlier version of this table listed `GO-05` and `GO-06` as covered, and a blind review caught that
+both tests passed against a correct fix. See "Verifying the checks can fail".
+
+| Fixture | Rows covered by running the code | Held by anchors only |
+|---|---|---|
+| `general/` | GEN-01…GEN-07 (all) | — |
+| `bash/` | SH-01…SH-07 (all) | — |
+| `go/` | GO-01, GO-02, GO-05, GO-07 | GO-03, GO-04, GO-06 |
+| `php/` | PHP-01, PHP-02, PHP-03, PHP-05, PHP-06 | PHP-04 |
+| `vue-ts/` | VT-02, VT-03, VT-06, VT-07 | VT-01, VT-04, VT-05 |
+| `security/` | — | SEC-01…SEC-07 |
+
+The gaps are honest ones, each with a reason:
+
+- **`GO-06`** is unobservable by construction. `DecodeEvent` returns only an `Event`, so "error
+  discarded" and "error logged, zero `Event` returned" look identical to every caller. Any test
+  asserting the zero value passes against a correct fix — which is what the earlier one did.
+- **`GO-05`** needed the consequence, not the shape. Counting descriptors around the call proves
+  nothing, because the defers have all run by the time it returns. The test now walks 200 files in a
+  child process with a 64-descriptor limit, where holding them open makes `os.Open` fail partway and
+  the total come up short.
+- **`PHP-04`** cannot be checked in-process: `session_start()` is not repeatable.
+- **`VT-01`/`VT-04`/`VT-05`** live in a `.vue` SFC, which needs the Vue compiler this repo does not
+  depend on.
+- **`GO-03`/`GO-04`** are a leak and an injection whose effects need a live context and a real
+  database rather than assertions.
+- **`security/`** is a framework sketch with stubbed routes, so nothing in it is callable.
+
+Two hazards worth knowing about, both found by these tests failing honestly:
+
+- **Stale bytecode.** Python invalidates a `.pyc` on `(mtime, size)`. An edit changing neither —
+  `+ 25` to `+ 30` inside one second — is invisible to that check, and a stale cache answers for the
+  source. Two mitigations, because one is not enough: `run.sh` clears `tests/fixtures/**/__pycache__`
+  before the differential gates (the `py_compile` gate above them writes those files), and
+  `test_differential.py` sets `sys.dont_write_bytecode` so it adds no more. Note the asymmetry —
+  `dont_write_bytecode` stops writing, not reading, so on its own it would not have helped.
+- **`set -u` hides SH-07.** Under `set -u` the unset array reference in `x[$(...)]` is a *fatal*
+  unbound-variable error: bash exits 127 before the command substitution runs. `vulnerable.sh` has
+  no `set -u` — that is SH-02 — which is exactly what leaves SH-07 reachable. The two rows are not
+  independent, and a harness with its own `set -u` demonstrates the guard rather than the defect.
+
+What none of this proves: that a review finds the planted defects, scores them correctly, or stays
+quiet on the clean fixtures. Those need an agent.
 
 ## Manual
 
@@ -201,5 +254,58 @@ The validator enforces the loop, so the order matters:
 
 1. Add the row to the skill's checklist table with the next ID in its prefix.
 2. Plant a matching defect in that skill's `vulnerable.*` fixture, annotated `VULN: <ID>`.
-3. Write the correct counterpart into the `clean.*` fixture.
-4. `python3 tests/validate.py` — it fails at step 1 alone, which is the point.
+3. Give it an anchor on the following line — `ANCHOR:` with a literal from the defective construct,
+   or `ANCHOR-ABSENT:` with the guard whose absence is the defect. Anchors must be at least 8
+   characters and distinctive enough not to match incidentally. **Grep the clean fixture for the
+   anchor before committing it**: a literal that also appears there is true of the correct version,
+   so it can never detect the defect being fixed.
+4. Write the correct counterpart into the `clean.*` fixture.
+5. Add a differential check if the defect is observable by running it, and update the coverage table
+   above either way. A row that lands in the anchors-only column needs a stated reason.
+6. `python3 tests/validate.py` — it fails at step 1 alone, which is the point.
+
+## Verifying the checks can fail
+
+A check that cannot fail is worse than no check, so both mechanisms were mutation-tested: fix the
+planted defect, confirm the suite goes red, restore. Results on 2026-07-25:
+
+| Mechanism | Mutations | Caught |
+|---|---|---|
+| `check_vuln_anchors` (positive) | 8 | 8 |
+| `check_vuln_anchors` (`ANCHOR-ABSENT`) | 4 | 4 |
+| `check_vuln_anchors` vs *semantically correct* fixes (VT-05, SH-06) | 2 | 2 |
+| Go differential | 5 | 4 (GO-06 is anchors-only — see above) |
+| TypeScript differential | 4 | 4 |
+| Python differential | 7 | 7 |
+| Bash differential | 7 | 7 |
+
+**An anchor must not match the clean fixture.** `VT-05`'s original anchor was the `defineProps<...>`
+line — byte-identical in `clean.vue`, because VT-05's defect is the *absence* of validation, not the
+presence of `defineProps`. Applying the real fix left `validate.py` fully green. It now anchors
+`:href="props.avatarUrl"`, which only the defective version has. `SH-06` had the mirror problem: it
+anchored `RELEASE=$2` while its prose described `DEST=$1`, so the canonical fix passed. Both were
+found by blind review, not by the mutation runs above — mutating *deletions* is not the same as
+mutating *fixes*.
+
+Auditing the rest for the same shape turned up three more (`GO-05` anchored `defer f.Close()`, which
+`clean.go` also does; `GEN-03` anchored `return written`; `SH-02`'s second site anchored a pipeline
+deliberately identical in `clean.sh`). Rather than fix those and hope, `check_vuln_anchors` now
+rejects any positive anchor that appears in the clean counterpart, so the whole class is closed
+structurally. `ANCHOR-ABSENT` is exempt — the guard it names is *expected* in the clean fixture.
+
+**Mutate with a correct fix, not a broken one.** The `GO-05` test originally looked green against
+`defer f.Close()` → `f.Close()`, but that mutation *breaks* the function — the file is closed before
+`Stat`, so the total goes wrong for a reason unrelated to the row. Against the fix a real engineer
+would make (extract the loop body so `defer` runs per call, as `clean.go` does), the same test
+passed. A mutation that damages the code proves nothing; it has to be the change you are afraid
+someone will make.
+
+Two more traps, both of which produced false "caught"/"missed" results before being spotted:
+
+- **Anchors shadow naive mutations.** Replacing the first textual match hits the `ANCHOR:` comment,
+  because it quotes the construct verbatim and comes first. Target the code line explicitly
+  (`if "..." in l and "ANCHOR" not in l`). Three apparent misses were this.
+- **Assertions that a wrong path also satisfies.** `GEN-04` counted `fetch` calls and expected two —
+  but a serialised path where the first fetch fails and the second retries also reaches two, so a
+  lock-guarded fix slipped through. It now asserts that both threads were *inside* `fetch`
+  simultaneously, using a barrier whose successful release is the proof.

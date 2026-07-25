@@ -110,15 +110,37 @@ gate "php -l on PHP fixtures" php "${#php_fixtures[@]}" \
 gate "py_compile on Python fixtures" python3 "${#py_fixtures[@]}" \
   python3 -m py_compile "${py_fixtures[@]}"
 
-# --- Differential gates: prove the general Python fixtures still behave as their VULN comments
-# claim, since py_compile only proves they parse. There is no such gate for Go/Bash/PHP/Vue-TS
-# fixtures yet -- see the "go vet" gate above for the one language this has been extended to so
-# far.
+# --- Differential gates: prove each vulnerable fixture still *behaves* as its VULN comments claim,
+# not merely that it parses.
+#
+# These are the second half of a pair. validate.py's ANCHOR lines prove a planted construct was not
+# deleted; they cannot prove it still does anything, because a fix that leaves the anchored text in
+# place and neutralises it elsewhere matches the anchor perfectly. The gates below close that
+# residue for every row whose defect is observable by running it.
+# The py_compile gate above writes .pyc files, and Python invalidates them on (mtime, size) only.
+# An edit that changes neither -- which is routine when mutation-testing these fixtures -- leaves a
+# stale cache answering for the source. Clearing it here makes the gates below read what is
+# actually on disk. sys.dont_write_bytecode inside the test files stops them adding more, but it
+# cannot stop them *reading* what py_compile already wrote.
+find tests/fixtures -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
 gate "shipping_band boundary tests pass against clean.py" python3 1 \
   python3 tests/fixtures/general/test_shipping_band.py
 
-gate "differential tests confirm vulnerable.py still disagrees with clean.py" python3 1 \
+gate "differential: general Python fixtures still diverge" python3 1 \
   python3 tests/fixtures/general/test_differential.py
+
+gate "differential: Bash fixtures still diverge" bash 1 \
+  bash tests/fixtures/bash/differential.sh
+
+gate "differential: PHP fixtures still diverge" php 1 \
+  php tests/fixtures/php/differential.php
+
+gate "differential: TypeScript fixtures still diverge" node 1 \
+  node tests/fixtures/vue-ts/differential.test.mjs
+
+gate "differential: Go fixtures still diverge" go 1 \
+  bash -c 'cd tests/fixtures/go && go test ./...'
 
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
 # shellcheck disable=SC2016
@@ -139,8 +161,11 @@ gate "shfmt formatting on clean Bash fixtures" shfmt "${#sh_clean[@]}" \
   shfmt -i 2 -ci -d "${sh_clean[@]}"
 
 # Dogfooding: the suite's own shell has to survive the gate the suite applies to everyone else.
+# differential.sh sits under fixtures/ but is ours, not a fixture -- it is test code and is held to
+# the same standard as the rest. The clean/vulnerable fixtures are excluded on purpose: one is
+# gated separately above, and the other is supposed to fail.
 shopt -s nullglob
-repo_scripts=(review-tools.sh tests/*.sh)
+repo_scripts=(review-tools.sh tests/*.sh tests/fixtures/bash/differential.sh)
 shopt -u nullglob
 gate "shellcheck on this repo's own scripts" shellcheck "${#repo_scripts[@]}" \
   shellcheck -S style "${repo_scripts[@]}"

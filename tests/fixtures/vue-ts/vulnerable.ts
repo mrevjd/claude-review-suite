@@ -4,6 +4,7 @@
 export function renderSearchSummary(el: HTMLElement, query: string, hits: number): void {
   // VULN: VT-02 -- the query comes from the address bar and is assigned as HTML, so this is
   // reflected XSS reached without touching a template.
+  // ANCHOR: el.innerHTML = `<strong>${hits}</strong> results for <em>${query}</em>`
   el.innerHTML = `<strong>${hits}</strong> results for <em>${query}</em>`
 }
 
@@ -20,6 +21,7 @@ export async function transferFunds(toAccount: string, amountCents: number): Pro
   // JSON content type forces a CORS preflight, so a bare cross-origin form cannot trigger this
   // alone -- but any origin the backend's CORS policy allows with credentials can, and nothing
   // here stops that policy from being permissive.
+  // ANCHOR-ABSENT: X-CSRF-Token
   return fetch('/api/transfer', {
     method: 'POST',
     credentials: 'include',
@@ -31,6 +33,7 @@ export async function transferFunds(toAccount: string, amountCents: number): Pro
 // VULN: VT-06 -- keys are copied without rejecting __proto__, so a payload of
 // {"__proto__": {"isAdmin": true}} mutates Object.prototype and every object in the runtime
 // appears to have isAdmin.
+// ANCHOR: for (const key in source)
 export function mergePreferences(target: any, source: any): any {
   for (const key in source) {
     if (typeof source[key] === 'object' && source[key] !== null) {
@@ -45,6 +48,7 @@ export function mergePreferences(target: any, source: any): any {
 // VULN: VT-07 -- any at the network boundary switches off checking exactly where the shape is least
 // known, so a changed or error-shaped response throws "undefined is not iterable" in the browser
 // instead of failing the build.
+// ANCHOR: const body: any = await res.json()
 export async function loadItems(url: string): Promise<string[]> {
   const res = await fetch(url)
   const body: any = await res.json()

