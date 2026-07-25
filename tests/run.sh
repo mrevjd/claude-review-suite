@@ -117,6 +117,7 @@ gate "py_compile on Python fixtures" python3 "${#py_fixtures[@]}" \
 # deleted; they cannot prove it still does anything, because a fix that leaves the anchored text in
 # place and neutralises it elsewhere matches the anchor perfectly. The gates below close that
 # residue for every row whose defect is observable by running it.
+
 # The py_compile gate above writes .pyc files, and Python invalidates them on (mtime, size) only.
 # An edit that changes neither -- which is routine when mutation-testing these fixtures -- leaves a
 # stale cache answering for the source. Clearing it here makes the gates below read what is

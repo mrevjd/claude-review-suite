@@ -17,6 +17,9 @@ tests/fixtures/go/fixture
 *.test
 *.out
 
+# Worktrees for in-flight feature work
+.worktrees/
+
 # Editor and OS noise
 .DS_Store
 *.swp
