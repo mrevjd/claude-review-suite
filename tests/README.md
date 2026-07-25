@@ -75,7 +75,25 @@ needs its "why it matters" tightened.
 
 ### 3. Trigger behaviour — design criterion 3
 
-In a fresh session each time, issue the phrasing and observe which skill loads.
+**Now scripted.** `tests/trigger-test.sh` runs all eight cases:
+
+```bash
+bash tests/trigger-test.sh
+```
+
+Each case runs in a genuinely fresh headless session (`claude -p`) with the plugin installed, so the
+routing decision is made by an agent that has never seen this repository — which is the whole point,
+and the reason the fixtures' author cannot stand in for it. `--allowed-tools Skill` keeps each run to
+the routing decision instead of paying for a full review. The script parses the stream-json
+transcript for `Skill` tool calls and scores both halves: the intended skill fired, and the contender
+did not. It skips (exit 0) rather than failing when the `claude` CLI is absent or the plugin is not
+installed.
+
+`claude plugin eval` would be the better instrument — it has a no-plugin ablation arm — but it is
+gated behind early access. Revisit when it opens up.
+
+The table below is the source of truth for what each case asserts; run it by hand if you want to
+watch the routing happen.
 
 | Phrasing | Must load | Must not load |
 |---|---|---|
@@ -112,7 +130,7 @@ confirm the report distinguishes "the tool found problems" from "the tool could 
 |---|---|
 | 1. Severity accuracy | **Weak pass.** All 41 planted IDs locatable with defensible severity — but run by the fixtures' own author, so it does not show that the checklists lead an unprimed reviewer to the defects. Re-run blind before trusting it. |
 | 2. False positives | **Pass.** Zero Critical and zero High across all six clean fixtures. Two Mediums found and since fixed: a lock held across a network call in `general/clean.py`, and a `security/clean.py` comment claiming SSRF protection stronger than the code provided. |
-| 3. Trigger behaviour | **Not run.** Needs the plugin installed and a fresh session per phrasing. `check_trigger_distinctness` only proves the descriptions cannot contend on language tokens. |
+| 3. Trigger behaviour | **Pass, 8/8.** Run via `tests/trigger-test.sh`. Every phrasing loaded its intended skill and no contender fired. Two confounds resolved in the suite's favour: Claude Code's built-in `/security-review` did **not** win tests 3 and 4 — `claude-review-suite:security-review` did — and no `superpowers` skill hijacked routing despite a global instruction to prefer them. |
 | 4. Tools absent | **Pass.** Under `PATH=/usr/bin:/bin` (17 of 21 tools hidden), every missing linter became a `SKIP` with its reason, exit stayed 0, and no absent check was reported as passing. |
 
 Criterion 1 also surfaced a gap the validator cannot see: one defect frequently matches two checklist

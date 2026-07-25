@@ -78,14 +78,21 @@ ts_fixtures=(tests/fixtures/vue-ts/*.ts)
 shopt -u nullglob
 
 # --- Syntax gates: every fixture must parse. A vulnerable fixture has to be vulnerable, not broken.
+#
+# The `bash -c '...'` wrappers below are single-quoted on purpose: the loop body must expand $f in
+# the *inner* shell, once per file. Hence the per-call SC2016 suppressions -- the warning is correct
+# about what the quoting does, and what it does is what we want.
 
+# shellcheck disable=SC2016
 gate "gofmt parses Go fixtures" gofmt "${#go_fixtures[@]}" \
   bash -c 'for f in "$@"; do gofmt -e "$f" >/dev/null || exit 1; done' _ "${go_fixtures[@]}"
 
+# shellcheck disable=SC2016
 gate "bash -n parses Bash fixtures" bash "${#sh_all[@]}" \
   bash -c 'for f in "$@"; do bash -n "$f" || exit 1; done' _ "${sh_all[@]}"
 
 # php -l takes one file at a time.
+# shellcheck disable=SC2016
 gate "php -l on PHP fixtures" php "${#php_fixtures[@]}" \
   bash -c 'for f in "$@"; do php -l "$f" || exit 1; done' _ "${php_fixtures[@]}"
 
@@ -93,6 +100,7 @@ gate "py_compile on Python fixtures" python3 "${#py_fixtures[@]}" \
   python3 -m py_compile "${py_fixtures[@]}"
 
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
+# shellcheck disable=SC2016
 gate "node --check on TS fixtures" node "${#ts_fixtures[@]}" \
   bash -c 'for f in "$@"; do node --check "$f" || exit 1; done' _ "${ts_fixtures[@]}"
 
@@ -108,6 +116,13 @@ expect_flagged "shellcheck flags vulnerable Bash fixtures" shellcheck "${#sh_vul
 # rather than the project's chosen style would report a style disagreement as a defect.
 gate "shfmt formatting on clean Bash fixtures" shfmt "${#sh_clean[@]}" \
   shfmt -i 2 -ci -d "${sh_clean[@]}"
+
+# Dogfooding: the suite's own shell has to survive the gate the suite applies to everyone else.
+shopt -s nullglob
+repo_scripts=(review-tools.sh tests/*.sh)
+shopt -u nullglob
+gate "shellcheck on this repo's own scripts" shellcheck "${#repo_scripts[@]}" \
+  shellcheck -S style "${repo_scripts[@]}"
 
 if [[ ${#skipped[@]} -gt 0 ]]; then
   echo
