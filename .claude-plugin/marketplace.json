@@ -1,0 +1,21 @@
+{
+  "name": "claude-review-suite",
+  "description": "Marketplace hosting the claude-review-suite code and security review skills",
+  "owner": {
+    "name": "Evan Davies",
+    "email": "evan.davies@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-review-suite",
+      "description": "Code and security review skills for Go, Bash, Vue/TypeScript and PHP that emit a human report plus a re-verifiable agent prompt block",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Evan Davies",
+        "email": "evan.davies@gmail.com"
+      },
+      "license": "MIT"
+    }
+  ]
+}

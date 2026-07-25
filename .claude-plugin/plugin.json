@@ -1,0 +1,20 @@
+{
+  "name": "claude-review-suite",
+  "description": "Code and security review skills for Go, Bash, Vue/TypeScript and PHP that emit a human report plus a re-verifiable agent prompt block",
+  "version": "0.1.0",
+  "author": {
+    "name": "Evan Davies",
+    "email": "evan.davies@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "code-review",
+    "security-review",
+    "static-analysis",
+    "go",
+    "bash",
+    "vue",
+    "typescript",
+    "php"
+  ]
+}

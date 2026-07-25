@@ -1,0 +1,25 @@
+# Byte-compiled fixtures, produced by tests/run.sh's py_compile gate
+__pycache__/
+*.py[cod]
+
+# Project-local tool installs. review-tools.sh resolves binaries from these
+# when REVIEW_TOOL_PREFER=local, so they can appear in a working tree.
+node_modules/
+vendor/
+
+# Scanner caches, if semgrep/trivy/gitleaks are ever run from the repo root
+.semgrep/
+.semgrep_logs/
+.trivycache/
+
+# Go build and coverage artifacts from the fixture module
+tests/fixtures/go/fixture
+*.test
+*.out
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/

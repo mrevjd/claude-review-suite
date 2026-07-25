@@ -1,0 +1,14 @@
+# Expected findings: this repository ships deliberately-vulnerable review fixtures, and several of
+# them must contain credential-shaped literals for the SEC-04 and VT-04 checklist rows to have
+# anything to catch.
+#
+# The literals themselves are inert (low entropy, EXAMPLE-prefixed bodies, and AWS's own published
+# documentation value), so nothing here is a real credential. This file exists so that running
+# gitleaks against the suite reports a genuine clean result rather than noise a reader learns to
+# scroll past -- an allowlist everyone ignores is how a real leak gets missed.
+#
+# Rule: only fixture paths belong here. If gitleaks ever flags something outside tests/fixtures/,
+# treat it as real and rotate it. Do not add it to this file.
+
+tests/fixtures/security/vulnerable.py
+tests/fixtures/vue-ts/vulnerable.vue

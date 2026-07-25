@@ -1,0 +1,143 @@
+# claude-review-suite
+
+Six Claude Code skills that review code for correctness and security, emit a human-readable report,
+and emit a machine-consumable prompt block a downstream coding agent can act on — with mandatory
+re-verification, so a stale finding is never blindly applied.
+
+The suite reports. It does not auto-fix.
+
+## Install
+
+```
+/plugin marketplace add mrevjd/claude-review-suite
+/plugin install claude-review-suite@claude-review-suite
+```
+
+Optionally install the analysers the skills probe for — see [Toolchain](#toolchain):
+
+```bash
+./review-tools.sh probe      # what's present
+./review-tools.sh install    # install what isn't
+```
+
+## Skills
+
+| Skill | Triggers on | Carries |
+|---|---|---|
+| `code-review` | "review this", "look over this PR", "before I merge", "any bugs in this" | General checklist `GEN-01`…`GEN-07`; detects languages and delegates |
+| `security-review` | "security review", "audit this", "check for vulns", "is this exploitable" | Threat checklist `SEC-01`…`SEC-07`; `semgrep`, `gitleaks`, `trivy` |
+| `review-go` | `.go` files, "review this Go service" | `GO-01`…`GO-07`; `go vet`, `staticcheck`, `gosec`, `govulncheck`, `errcheck` |
+| `review-bash` | `.sh`/`.bash` files, a shell shebang, "review this script" | `SH-01`…`SH-07`; `shellcheck`, `shfmt` |
+| `review-vue-ts` | `.vue`/`.ts`/`.tsx` files, "review this component" | `VT-01`…`VT-07`; `tsc --noEmit`, `eslint`, `bun audit`, `knip` |
+| `review-php` | `.php` files, "audit this endpoint" | `PHP-01`…`PHP-06`; `php -l`, `phpstan`, `composer audit` |
+
+The two entry-point skills detect the languages in the diff or tree and run every language skill that
+applies, merging all findings into one severity-ordered list. Each language skill also works
+standalone. Languages outside the four — Python, Perl, Ruby, SQL, config — fall through to the
+general or threat checklist, and the report says so rather than passing over them in silence.
+
+## Hybrid tooling
+
+Guidance is the baseline; tools sharpen it. Every skill probes with `command -v` before it runs
+anything, and every check that did not run is named in a `## Checks skipped` table with a reason and
+an install hint. **A tool that crashed is a skipped check, never a clean result** — "gosec found
+nothing" and "gosec did not run" are opposite claims, and conflating them is the most dangerous thing
+a review can do.
+
+Nothing needs to be installed for a review to complete.
+
+## Toolchain
+
+`review-tools.sh` manages the binaries the skills probe for. It is a convenience, not a dependency —
+every skill degrades to its checklist when a tool is absent.
+
+```bash
+./review-tools.sh probe      # capability report: status, scope, version   (default)
+./review-tools.sh install    # install everything missing
+./review-tools.sh tsv        # same probe, tab-separated, for a skill to consume
+```
+
+`probe` prints a table and exits with a count of what is missing:
+
+```
+TOOL           STATUS   SCOPE   VERSION
+staticcheck    PRESENT  global  staticcheck 2026.1 (v0.7.0)
+gitleaks       PRESENT  global  gitleaks version 8.30.1
+...
+0 of 21 absent.
+```
+
+**Resolution order** is global first, then project-local (`node_modules/.bin`, `vendor/bin`) — so a
+globally installed `eslint` wins over a vendored one. Set `REVIEW_TOOL_PREFER=local` to reverse that,
+which is what you want when a project pins a specific analyser version. An optional second argument
+sets the directory those project-local paths resolve against: `./review-tools.sh probe ../some-app`.
+
+**`install` writes outside the repository.** Binaries land in `/usr/local/bin`, which needs sudo; set
+`PREFIX=$HOME/.local/bin` to install without it. Upstream release binaries are preferred over distro
+packages throughout — the distro package manager is used only for `curl`, `tar` and `unzip`, where
+staleness is harmless. Anything already on `PATH` is skipped, so re-running is safe.
+
+Versions are read from each binary rather than assumed, falling back to the embedded Go module
+version for tools whose `--version` flag is missing or prints usage text. A tool whose version cannot
+be determined reports `unknown` rather than being silently reported as fine.
+
+## Dual output
+
+**1. A human report.** Findings grouped by severity, worst first, each with severity, confidence,
+`file:line`, the checklist ID that caught it, what is wrong, why it matters, and a fix direction.
+Then the skipped-checks table.
+
+**2. An agent prompt block.** Fenced and copy-pasteable, carrying every severity from Critical to
+Low. Four rules make its re-verification real:
+
+- **Anchored by content.** Each finding carries a literal snippet from the cited location. The
+  receiving agent relocates the code by matching it; line numbers are marked `~` as hints. A snippet
+  that does not match means the finding is `SKIPPED-STALE` by definition.
+- **Intent, never a diff.** Each entry states what must be true when the fix is done. A patch would
+  get pasted without thought, which is the failure mode the block exists to prevent.
+- **Self-contained findings.** The receiving agent has none of the review context, so each entry
+  restates enough of the why to be judged alone.
+- **A mandatory status table.** Every finding ID returns `FIXED`, `SKIPPED-STALE`, or
+  `SKIPPED-DISAGREE` with a reason. Stale and disagree stay distinct: the first says the review aged,
+  the second says it may have been wrong, and collapsing them loses the only feedback signal on
+  review quality.
+
+Validation commands in the block come from the same probe the review used, so it never tells an agent
+to run a binary that is not installed. No findings means no block.
+
+## Layout
+
+```
+.claude-plugin/     plugin.json, marketplace.json
+references/         rubric.md (severity, confidence, finding format)
+                    procedure.md (probe, detection, report skeleton, error handling)
+                    agent-prompt.md (block template and fill rules)
+skills/             one directory per skill, each a single SKILL.md
+tests/              validate.py, run.sh, fixtures/, README.md
+review-tools.sh     probe / install / tsv for the tools the skills use
+```
+
+All six skills reference the same three documents, which is what lets a Go finding and a Vue finding
+merge into one coherent list.
+
+## Testing
+
+```bash
+bash tests/run.sh    # structural validator + every installed linter, against the fixtures
+```
+
+Each skill has known-vulnerable and known-clean fixtures, with every planted defect annotated
+`VULN: <checklist-id>`. The validator enforces that every checklist row has fixture coverage, that the
+agent prompt block parses with usable anchors, and that skill descriptions cannot contend for
+triggers. The criteria that need a live agent — severity accuracy, false-positive rate, trigger
+behaviour — are a documented manual protocol in `tests/README.md`, deliberately not claimed as
+automated.
+
+## Name collision
+
+Claude Code ships a built-in `/security-review` command. When both are available, invoke this one as
+`claude-review-suite:security-review`.
+
+## License
+
+MIT.
