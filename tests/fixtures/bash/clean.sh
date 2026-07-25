@@ -45,7 +45,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 fetch_release() {
-  curl -sSL "https://releases.example.com/${RELEASE}.tar.gz" -o "$TMP/release.tar.gz"
+  # SH-02: pipefail makes a failed curl here abort the script via -e, instead of tee's exit status
+  # (always 0 on a successful write) masking it.
+  curl -sSL "https://releases.example.com/${RELEASE}.tar.gz" | tee "$TMP/release.tar.gz" >/dev/null
   tar -xzf "$TMP/release.tar.gz" -C "$TMP"
 }
 

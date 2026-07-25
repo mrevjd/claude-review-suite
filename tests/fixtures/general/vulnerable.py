@@ -14,8 +14,9 @@ TAX_RATE = 0.2
 
 def page_of(rows, page, per_page):
     """Return the rows for a 1-indexed page."""
-    # VULN: GEN-01 -- off-by-one on both bounds. Page 1 drops the first row and the slice runs one
-    # element past the window, so every page overlaps its neighbour and row 0 is never returned.
+    # VULN: GEN-01 -- the start bound treats page as 0-indexed (page * per_page instead of
+    # (page - 1) * per_page), so page 1 skips an entire page of rows; the end bound is separately
+    # off by one element past the window.
     start = page * per_page
     end = start + per_page + 1
     return rows[start:end]
@@ -57,8 +58,9 @@ _rate_cache = {}
 
 def cached_rate(currency, fetch):
     # VULN: GEN-04 -- the module-level dict is read and written from every worker thread with no
-    # lock, so two threads racing on a cold cache both fetch, and a partially built value can be
-    # observed by a reader.
+    # lock, so two threads racing on a cold cache can both see currency missing and both call
+    # fetch; whichever store runs last silently overwrites the other, so two callers can end up
+    # holding different objects for what is supposed to be the same cached value.
     if currency not in _rate_cache:
         _rate_cache[currency] = fetch(currency)
     return _rate_cache[currency]
@@ -96,11 +98,9 @@ def statement_total(invoice):
 
 def shipping_band(weight_grams):
     """Return the shipping band for a parcel weight."""
-    if weight_grams <= 0:
-        # VULN: GEN-07 -- the zero and negative branch is the one a reviewer has to stop and think
-        # about, and it is the one with no test. A scale returning 0 silently bills as "light"
-        # rather than failing.
-        return "light"
+    # VULN: GEN-07 -- weight_grams has no lower-bound check, so a scale reporting a zero or
+    # negative reading (a fault, not a real parcel) is silently priced as "light" like any small
+    # package, and nothing pins what a non-positive reading should do.
     if weight_grams < 1000:
         return "light"
     if weight_grams < 20000:

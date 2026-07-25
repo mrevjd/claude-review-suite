@@ -73,6 +73,22 @@ fixtures are realistic code, not perfect code — but each one should survive be
 Critical or High on a clean fixture is a false positive and means the checklist row that produced it
 needs its "why it matters" tightened.
 
+**Now also scripted, with a caveat `tests/trigger-test.sh` doesn't have.** `tests/severity-test.sh`
+runs all six vulnerable fixtures through a fresh headless session each and scores the report against
+the planted `VULN:` IDs and the floor list above:
+
+```bash
+bash tests/severity-test.sh
+```
+
+The caveat: a fresh session that reads a fixture's own "deliberately defective... used to test the
+review-X skill" header can reasonably conclude the file is inert (nothing imports it, nothing runs
+it) and apply the rubric's own reachability rule to decline scoring the plants as live findings —
+auditing the plants' *accuracy* instead of their severity. That happened on the first run of this
+script and is a legitimate reading of the rubric, not a bug in the reviewer. Read the actual reports
+before trusting the score; a raw FAIL can mean "under-scored" or it can mean "found something more
+useful than what was asked." See the 2026-07-25 entry below for what that first run actually found.
+
 ### 3. Trigger behaviour — design criterion 3
 
 **Now scripted.** `tests/trigger-test.sh` runs all eight cases:
@@ -128,7 +144,7 @@ confirm the report distinguishes "the tool found problems" from "the tool could 
 
 | Criterion | Result |
 |---|---|
-| 1. Severity accuracy | **Weak pass.** All 41 planted IDs locatable with defensible severity — but run by the fixtures' own author, so it does not show that the checklists lead an unprimed reviewer to the defects. Re-run blind before trusting it. |
+| 1. Severity accuracy | **Pass, blind.** See the two `severity-test.sh` runs below — 41/41 IDs found on the second, one (`GO-04`) still under the floor for a defensible reason, not a fixture bug. |
 | 2. False positives | **Pass.** Zero Critical and zero High across all six clean fixtures. Two Mediums found and since fixed: a lock held across a network call in `general/clean.py`, and a `security/clean.py` comment claiming SSRF protection stronger than the code provided. |
 | 3. Trigger behaviour | **Pass, 8/8.** Run via `tests/trigger-test.sh`. Every phrasing loaded its intended skill and no contender fired. Two confounds resolved in the suite's favour: Claude Code's built-in `/security-review` did **not** win tests 3 and 4 — `claude-review-suite:security-review` did — and no `superpowers` skill hijacked routing despite a global instruction to prefer them. |
 | 4. Tools absent | **Pass.** Under `PATH=/usr/bin:/bin` (17 of 21 tools hidden), every missing linter became a `SKIP` with its reason, exit stayed 0, and no absent check was reported as passing. |
@@ -136,6 +152,48 @@ confirm the report distinguishes "the tool found problems" from "the tool could 
 Criterion 1 also surfaced a gap the validator cannot see: one defect frequently matches two checklist
 rows, and nothing said how to attribute it. `references/rubric.md` now carries the rule ("One defect
 matching several checklist rows"), keyed on whether the rows imply the same fix.
+
+### Criterion 1, blind — two `severity-test.sh` runs, 2026-07-25
+
+The first run — same-author severity accuracy is the weakest kind of pass, so this suite ran itself
+through the same blind technique that closed criterion 3. It found something more useful than a
+severity score: **the fixtures' own `VULN:` annotations had real, unnoticed defects**, caught only
+because a reviewer with no memory of writing them checked each claim against the code instead of
+trusting the comment. Fixed as a direct result:
+
+| Fixture | What was wrong |
+|---|---|
+| `php/vulnerable.php` PHP-05 | `login()` had no `password_verify` call at all — not "bypassable", absent. Added the check; the concatenated query is now the sole remaining defect. |
+| `php/vulnerable.php` PHP-03 | The annotation's `%00` null-byte PoC has been dead since PHP 5.3.4. Restated without it. |
+| `php/vulnerable.php` PHP-04 | `cookie_secure` was left to ambient `php.ini` instead of pinned like the other two sub-defects. Pinned. |
+| `bash/vulnerable.sh` SH-02 | The annotation claimed a `pipefail` failure mode; no pipeline existed anywhere in the file. Added one (`curl \| tee ... \| tar`) where `tee`'s always-0 exit genuinely masks a failed `curl`, verified empirically before landing it. |
+| `bash/vulnerable.sh` | A second, unannotated unquoted-`$DEST` site at line 55 masked the annotated SH-01 site's shellcheck signal. Quoted. |
+| `go/vulnerable.go` | `TotalSize`'s swallowed errors read as an unannotated second GO-06 instance. Commented as deliberate best-effort handling instead. |
+| `go` toolchain | `run.sh` only ran `gofmt -e` (a parse gate) against Go fixtures — no compile or vet gate existed at all. Added both (see `run.sh`). |
+| `vue-ts/vulnerable.vue` | An 8th, unannotated defect (untyped JSON into a typed ref, no `res.ok`) contradicted the file's own three-defect header ledger. Guarded to match `clean.vue`. |
+| `vue-ts/vulnerable.ts` VT-02 | `renderSearchSummary` had no caller anywhere in the fixture pair, undercutting the README's Critical/High floor for that row. Gave it one, off `location.search`. |
+| `vue-ts/vulnerable.ts` VT-03 | The CSRF annotation claimed "any origin"; the request's JSON content type actually forces a CORS preflight. Restated with the real precondition. |
+| `general/vulnerable.py` GEN-01 | Annotation said "off-by-one, drops the first row"; the code drops an entire page. Restated. |
+| `general/vulnerable.py` GEN-04 | Annotation claimed a torn/partial read; the dict store is atomic under the GIL, so that race is impossible. Restated as the real race (duplicate fetch, last store wins) — now consistent with `clean.py`'s comment for the same mechanism. |
+| `general/vulnerable.py` GEN-07 | The boundary branch was behaviourally identical to deleting it (verified), so it read as GEN-06 dead code, not an untested boundary. Removed the redundant branch so the missing lower-bound check is the only thing there. |
+| `general/` | Nothing executed the fixtures' actual behaviour — `test_shipping_band.py` existed but wasn't wired into `run.sh`, and `GEN-02`/`GEN-04`/`GEN-05`/`GEN-06` had no executable check at all. Added `test_differential.py` (asserts `vulnerable.py` and `clean.py` disagree on the inputs each plant names) and wired both files into `run.sh`. |
+
+The second run, after those fixes: 41/41 planted IDs found (zero missing, down from four), one
+(`GO-04`) still under the Critical/High floor. That one is not a fixture bug — `package fixture` has
+no `func main`, no test, nothing that imports it, and a reviewer applying the rubric's own
+reachability rule to a package literally nothing consumes is being consistent, not wrong. Closing it
+for real means giving the Go package the same kind of reachable caller VT-02 got, and `GO-07`
+(unsynchronised map write) makes that harder than it sounds: a concurrent map write is an
+unrecoverable Go runtime fatal error, not a panic, so a test that exercises it the obvious way takes
+the whole test binary down rather than failing one case. Left as a known, accepted gap rather than
+worked around under time pressure.
+
+One more thing worth naming: the first run had `review-php`, `review-vue-ts`, and `security-review`
+all decline to score their fixtures' plants as live findings — treating the "deliberately vulnerable
+test fixture" framing as a reason not to. The second run, after only fixture-content edits (no skill
+changes), had all three score real `[F1] Critical`-style findings instead. Same skills, same
+rubric, different runs. Treat one `severity-test.sh` run as directional, not definitive — the
+reachability-versus-fixture-framing judgement call is genuinely close enough to go either way.
 
 ## Adding a checklist row
 

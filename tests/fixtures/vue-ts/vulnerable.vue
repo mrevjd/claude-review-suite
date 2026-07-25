@@ -22,7 +22,12 @@ onMounted(async () => {
   const res = await fetch('https://analytics.example.com/v1/views', {
     headers: { Authorization: `Bearer ${ANALYTICS_KEY}` },
   })
-  views.value = (await res.json()).count
+  if (!res.ok) return
+  const body: unknown = await res.json()
+  if (typeof body === 'object' && body !== null && 'count' in body) {
+    const count = (body as { count: unknown }).count
+    if (typeof count === 'number') views.value = count
+  }
 })
 </script>
 

@@ -70,6 +70,8 @@ func FindUser(db *sql.DB, name string) (*sql.Rows, error) {
 func TotalSize(paths []string) int64 {
 	var total int64
 	for _, p := range paths {
+		// Best-effort: an unreadable path is skipped rather than aborting the whole total, so its
+		// error is deliberately not GO-06 -- there is one planted defect in this function, not two.
 		f, err := os.Open(p)
 		if err != nil {
 			continue

@@ -7,9 +7,19 @@ export function renderSearchSummary(el: HTMLElement, query: string, hits: number
   el.innerHTML = `<strong>${hits}</strong> results for <em>${query}</em>`
 }
 
+// Reachable from the page's own query string -- this is what actually calls
+// renderSearchSummary with attacker-influenced input, matching the VULN comment's premise.
+if (typeof document !== 'undefined') {
+  const summaryEl = document.getElementById('search-summary')
+  const query = new URLSearchParams(window.location.search).get('q') ?? ''
+  if (summaryEl) renderSearchSummary(summaryEl, query, 0)
+}
+
 export async function transferFunds(toAccount: string, amountCents: number): Promise<Response> {
-  // VULN: VT-03 -- a state-changing POST that sends the session cookie with no CSRF token, so any
-  // origin can make the browser perform this transfer on the user's behalf.
+  // VULN: VT-03 -- a state-changing POST that sends the session cookie with no CSRF token. The
+  // JSON content type forces a CORS preflight, so a bare cross-origin form cannot trigger this
+  // alone -- but any origin the backend's CORS policy allows with credentials can, and nothing
+  // here stops that policy from being permissive.
   return fetch('/api/transfer', {
     method: 'POST',
     credentials: 'include',

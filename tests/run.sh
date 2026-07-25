@@ -87,6 +87,17 @@ shopt -u nullglob
 gate "gofmt parses Go fixtures" gofmt "${#go_fixtures[@]}" \
   bash -c 'for f in "$@"; do gofmt -e "$f" >/dev/null || exit 1; done' _ "${go_fixtures[@]}"
 
+# clean.go and vulnerable.go share one package with disjoint names, so they compile and vet
+# together -- there is no way to gate "silent on clean" separately from "flags vulnerable" the way
+# the Bash gates below do per-file. This still closes the real gap: without it, nothing here
+# compiled or vetted the Go fixtures at all, so a compile-breaking or vet-silencing edit passed
+# every check in this file.
+gate "go build compiles the Go fixture module" go "${#go_fixtures[@]}" \
+  bash -c 'cd tests/fixtures/go && go build ./...'
+
+expect_flagged "go vet flags something in the Go fixture module" go "${#go_fixtures[@]}" \
+  bash -c 'cd tests/fixtures/go && go vet ./...'
+
 # shellcheck disable=SC2016
 gate "bash -n parses Bash fixtures" bash "${#sh_all[@]}" \
   bash -c 'for f in "$@"; do bash -n "$f" || exit 1; done' _ "${sh_all[@]}"
@@ -98,6 +109,16 @@ gate "php -l on PHP fixtures" php "${#php_fixtures[@]}" \
 
 gate "py_compile on Python fixtures" python3 "${#py_fixtures[@]}" \
   python3 -m py_compile "${py_fixtures[@]}"
+
+# --- Differential gates: prove the general Python fixtures still behave as their VULN comments
+# claim, since py_compile only proves they parse. There is no such gate for Go/Bash/PHP/Vue-TS
+# fixtures yet -- see the "go vet" gate above for the one language this has been extended to so
+# far.
+gate "shipping_band boundary tests pass against clean.py" python3 1 \
+  python3 tests/fixtures/general/test_shipping_band.py
+
+gate "differential tests confirm vulnerable.py still disagrees with clean.py" python3 1 \
+  python3 tests/fixtures/general/test_differential.py
 
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
 # shellcheck disable=SC2016

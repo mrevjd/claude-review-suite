@@ -3,7 +3,8 @@
 # SH-01..SH-07. Must pass `bash -n` -- a vulnerable fixture has to be vulnerable, not broken.
 #
 # VULN: SH-02 -- no `set -euo pipefail` anywhere, so every failure below is ignored, every typo'd
-# variable expands to empty, and a failing producer in a pipe reports success.
+# variable expands to empty, and the pipeline in fetch_release below can fail invisibly (see the
+# comment there for the specific mechanism).
 
 # VULN: SH-05 -- the current directory is prepended to PATH, so a `tar` or `curl` dropped in the
 # working tree by anyone else runs instead of the real binary. Bare names below rely on it.
@@ -21,7 +22,10 @@ mkdir -p "$TMP"
 
 fetch_release() {
   # Bare `curl` resolved through the poisoned PATH above.
-  curl -sSL "https://releases.example.com/$RELEASE.tar.gz" -o "$TMP/release.tar.gz"
+  # VULN: SH-02 (pipefail half) -- `tee` exits 0 as long as it can write its output file, even on
+  # zero bytes, so a failed curl's exit status is masked: this line reports success regardless of
+  # whether the download actually happened.
+  curl -sSL "https://releases.example.com/$RELEASE.tar.gz" | tee "$TMP/release.tar.gz" >/dev/null
   tar -xzf "$TMP/release.tar.gz" -C "$TMP"
 }
 
@@ -52,5 +56,5 @@ fetch_release
 purge_old
 check_capacity
 run_hook "$3"
-cp -r $TMP/* $DEST/
+cp -r $TMP/* "$DEST/"
 echo "deployed $RELEASE to $DEST"

