@@ -139,7 +139,7 @@ fetch_cve() {
         fi
     fi
     code="$(curl -sS --max-time 20 ${cfg:+--config "$cfg"} \
-        -o "$out" -w '%{http_code}' "$API?cveId=$cve" 2>/dev/null || printf '000')"
+        -o "$out" -D "$HDRS" -w '%{http_code}' "$API?cveId=$cve" 2>/dev/null || printf '000')"
     [ -n "$cfg" ] && rm -f "$cfg"
     printf '%s' "$code"
 }
@@ -170,6 +170,24 @@ cache_fresh() {
     [ "$age" -lt "$ttl" ]
 }
 
+# ------------------------------------------------------------- rate limits ---
+# NVD allows 5 requests per rolling 30s unauthenticated and 50 with a key, and asks callers to
+# space requests rather than burst. The cap exists so a repository with 200 CVEs does not silently
+# turn a review into a twenty minute job; anything past it is reported, not hidden.
+SPACING=6
+MAX_LOOKUPS=8
+
+rate_limit_setup() {
+    if [ -n "$API_KEY" ]; then
+        SPACING="0.6"
+        MAX_LOOKUPS=50
+    fi
+    # Explicit `return 0` for the same set -e reason as resolve_key: an unset NVD_MAX_LOOKUPS is
+    # the normal case, not a failure.
+    [ -n "${NVD_MAX_LOOKUPS:-}" ] && MAX_LOOKUPS="$NVD_MAX_LOOKUPS"
+    return 0
+}
+
 cmd_check() {
     resolve_key
     local key_line
@@ -198,13 +216,14 @@ main() {
     fi
 
     resolve_key
+    rate_limit_setup
     command -v jq >/dev/null 2>&1 || { warn "jq not installed"; exit 1; }
     command -v curl >/dev/null 2>&1 || { warn "curl not installed"; exit 1; }
 
     local cve code row
-    # body is a global, not a local. The EXIT trap fires after main has returned, so a function
-    # local would already be out of scope and the trap would expand it to the empty string,
-    # leaking the temp file.
+    # body and HDRS are globals, not locals. The EXIT trap fires after main has returned, so a
+    # function local would already be out of scope and the trap would expand it to the empty
+    # string, leaking the temp file.
     #
     # `|| true` so a mktemp failure reports cleanly through warn()/exit 1 instead of a set -e
     # crash that leaks mktemp's own stderr text without going through this script's error path.
@@ -213,7 +232,12 @@ main() {
         warn "could not create a temp file"
         exit 1
     fi
-    trap 'rm -f "$body"' EXIT
+    HDRS="$(mktemp || true)"
+    if [ -z "$HDRS" ]; then
+        warn "could not create a temp file"
+        exit 1
+    fi
+    trap 'rm -f "$body" "$HDRS"' EXIT
 
     # The cache is an optimisation: this script's own header promises exit 1 only when it "could
     # not run at all", and an unwritable cache directory is not that -- every CVE is still fetchable,
@@ -226,6 +250,7 @@ main() {
     [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ] || \
         warn "cache directory $CACHE_DIR is unusable, every CVE will be refetched"
 
+    local lookups=0 capped=0
     while read -r cve; do
         local cached          # row and code are already declared above, do not redeclare them
         cached="$(cache_path "$cve")"
@@ -235,7 +260,31 @@ main() {
             [ -n "$row" ] && { printf '%s\tcache\n' "$row"; continue; }
         fi
 
+        if [ "$lookups" -ge "$MAX_LOOKUPS" ]; then
+            capped=$((capped + 1))
+            printf '%s\t-\t-\t-\t-\t-\t-\tunavailable\n' "$cve"
+            continue
+        fi
+        [ "$lookups" -gt 0 ] && sleep "$SPACING"
+        lookups=$((lookups + 1))
         code="$(fetch_cve "$cve" "$body")"
+
+        # 403 and 429 are NVD's rate-limit responses. One retry, honouring Retry-After when the
+        # response carries it, then give up and let the row say "unavailable".
+        if [ "$code" = "403" ] || [ "$code" = "429" ]; then
+            local backoff
+            # Most 403s carry no Retry-After, so grep exiting 1 here is the common case, not an
+            # error. Without `|| true` that is a crash on the exact path this retry exists to serve.
+            backoff="$(grep -i '^retry-after:' "$HDRS" 2>/dev/null | tr -dc '0-9' || true)"
+            if [ -z "$backoff" ]; then
+                backoff=30
+                [ -n "$API_KEY" ] && backoff=10
+            fi
+            warn "rate-limited by NVD (HTTP $code), retrying $cve in ${backoff}s"
+            sleep "$backoff"
+            code="$(fetch_cve "$cve" "$body")"
+        fi
+
         row=""
         [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
 
@@ -257,6 +306,13 @@ main() {
 
         printf '%s\t-\t-\t-\t-\t-\t-\tunavailable\n' "$cve"
     done <<<"$ids"
+
+    if [ "$capped" -gt 0 ]; then
+        warn "$capped CVE(s) past the lookup cap of $MAX_LOOKUPS were not enriched"
+        if [ -z "$API_KEY" ]; then
+            warn "set an API key to raise the cap; see README.md"
+        fi
+    fi
 }
 
 main "$@"

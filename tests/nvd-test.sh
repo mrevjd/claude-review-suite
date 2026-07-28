@@ -83,9 +83,13 @@ fi
 # not about fetched content, and it must never reach the real network to prove that. A pre-existing
 # cache hit for CVE-2021-44228 would print real cached data here instead of "unavailable", so this
 # starts from a cold cache rather than relying on being the first test to touch it.
+# NVD_MAX_LOOKUPS=1 (added by Task 5): two unique CVEs survive dedup here, and without a cap the
+# second would be spaced out by the keyless SPACING=6 sleep -- unrelated to what this test checks
+# and it would still assert the same "unavailable" row either way, since the cap path and the
+# empty-body-parse-failure path both print the identical dashed row.
 fresh_cache
 out=$(printf 'not-a-cve\ncve-2021-44228\nCve-2021-44228\nCVE-2020-8203\n' \
-  | PATH="$BOX/bin:$PATH" bash "$SCRIPT" 2>/dev/null)
+  | PATH="$BOX/bin:$PATH" NVD_MAX_LOOKUPS=1 bash "$SCRIPT" 2>/dev/null)
 rc=$?
 expected=$(printf 'CVE-2021-44228\t-\t-\t-\t-\t-\t-\tunavailable\nCVE-2020-8203\t-\t-\t-\t-\t-\t-\tunavailable')
 if [[ "$out" == "$expected" && $rc -eq 0 ]]; then
@@ -242,10 +246,11 @@ else
 fi
 
 # A key config file that fails to build must warn, not silently send the request keyless. The
-# shim below fails mktemp only on its second call in-process: main()'s body allocation is the
-# first call and must still succeed, fetch_cve()'s cfg allocation is the second and must fail --
-# with one CVE ID on stdin there is exactly one of each, so this targets only the path this test
-# is about, deterministically, with no dependence on timing or a real full disk.
+# shim below fails mktemp only on its third call in-process: main()'s body allocation is the
+# first call, its HDRS allocation (added in Task 5, for capturing response headers) is the
+# second, and fetch_cve()'s cfg allocation is the third and must fail -- with one CVE ID on
+# stdin there is exactly one of each, so this targets only the path this test is about,
+# deterministically, with no dependence on timing or a real full disk.
 REAL_MKTEMP="$(command -v mktemp)"
 mkdir -p "$BOX/failcfg"
 rm -f "$BOX/mktemp.count"
@@ -255,7 +260,7 @@ n=0
 [ -f "$BOX/mktemp.count" ] && n="\$(cat "$BOX/mktemp.count")"
 n=\$((n + 1))
 printf '%s' "\$n" >"$BOX/mktemp.count"
-if [ "\$n" -eq 2 ]; then
+if [ "\$n" -eq 3 ]; then
   echo "mktemp: no space left on device" >&2
   exit 1
 fi
@@ -331,6 +336,80 @@ if [[ "$row" == *$'\t'MEDIUM$'\t'* ]]; then
   ok "a CVSS v2-only record reads baseSeverity from the metric object, not cvssData"
 else
   bad "cvssMetricV2 severity fallback" "got '$row'"
+fi
+
+# ---------------------------------------------------------------- unresolvable input
+# The key resolution block above leaves $KEYFILE populated at 0600 with a real-looking secret and
+# never clears it, so without this every test from here on resolves a key by accident and runs
+# rate_limit_setup() in keyed mode (SPACING=0.6, MAX_LOOKUPS=50, backoff default 10) instead of the
+# keyless mode this section's numbers assume (SPACING=6, MAX_LOOKUPS=8, backoff default 30). None
+# of the assertions below currently depend on that distinction -- NVD_MAX_LOOKUPS overrides the cap
+# regardless of key state, and Retry-After outranks the hardcoded backoff default either way -- but
+# leaving it in place would silently mislabel every test after this point as keyless when it is not.
+rm -f "$KEYFILE"
+
+row=$(printf 'CVE-2099-99999\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/empty.json" NVD_TEST_CODE=200 bash "$SCRIPT" 2>/dev/null)
+rc=$?
+if [[ "$row" == "CVE-2099-99999"$'\t-\t-\t-\t-\t-\t-\t'unavailable ]] && [[ $rc -eq 0 ]]; then
+  ok "a CVE absent from NVD still emits a row, and the script still exits 0"
+else
+  bad "unknown CVE" "exit $rc, row '$row'"
+fi
+
+row=$(printf 'CVE-2020-12345\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/malformed.json" bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == *$'\t'unavailable ]]; then
+  ok "malformed JSON degrades to an unavailable row rather than crashing"
+else
+  bad "malformed JSON" "got '$row'"
+fi
+
+# Every input CVE gets exactly one output row, cap or no cap.
+rows=$(printf 'CVE-2020-0001\nCVE-2020-0002\nCVE-2020-0003\n' | PATH="$BOX/bin:$PATH" \
+  NVD_MAX_LOOKUPS=1 NVD_TEST_BODY="$FIXTURES/empty.json" bash "$SCRIPT" 2>/dev/null | wc -l)
+if [[ "$rows" -eq 3 ]]; then
+  ok "three inputs produce three rows even with the lookup cap at one"
+else
+  bad "row count under cap" "got $rows rows, expected 3"
+fi
+
+err=$(printf 'CVE-2020-0004\nCVE-2020-0005\n' | PATH="$BOX/bin:$PATH" \
+  NVD_MAX_LOOKUPS=1 NVD_TEST_BODY="$FIXTURES/empty.json" bash "$SCRIPT" 2>&1 >/dev/null)
+if grep -qi 'cap' <<<"$err"; then
+  ok "the lookup cap is reported on stderr so the report can name it"
+else
+  bad "cap reporting" "stderr said nothing about the cap: '$err'"
+fi
+
+# ---------------------------------------------------------------- rate-limit retry
+# The shim needs to serve response headers for this one, so extend it to honour -D.
+cat >"$BOX/bin/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS"
+out=""; dump=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -D) dump="$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+[ -n "$out" ] && [ -n "${NVD_TEST_BODY:-}" ] && cp "$NVD_TEST_BODY" "$out"
+[ -n "$dump" ] && [ -n "${NVD_TEST_RETRY_AFTER:-}" ] && \
+  printf 'HTTP/2 403\r\nRetry-After: %s\r\n\r\n' "$NVD_TEST_RETRY_AFTER" >"$dump"
+printf '%s' "${NVD_TEST_CODE:-200}"
+exit 0
+SHIM
+chmod +x "$BOX/bin/curl"
+
+: >"$CALLS"
+err=$(printf 'CVE-2020-0006\n' | PATH="$BOX/bin:$PATH" NVD_TEST_CODE=403 \
+  NVD_TEST_RETRY_AFTER=1 NVD_TEST_BODY="$FIXTURES/empty.json" bash "$SCRIPT" 2>&1 >/dev/null)
+if [[ $(wc -l <"$CALLS") -eq 2 ]] && grep -qi 'rate' <<<"$err"; then
+  ok "a 403 is retried once, honouring Retry-After, then reported"
+else
+  bad "rate-limit retry" "$(wc -l <"$CALLS") call(s), stderr '$err'"
 fi
 
 echo
