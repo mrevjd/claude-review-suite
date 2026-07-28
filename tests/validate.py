@@ -515,10 +515,57 @@ def check_installer_is_suggested_not_run():
                      f"qualifier in the same paragraph: {first[:70]!r}")
 
 
+def check_nvd_enrichment():
+    """The NVD enrichment feature carries one rule that keeps it from degrading the reports it
+    decorates: a CVSS score is evidence, never severity. rubric.md makes reachability drive
+    severity, so a 9.8 in unreachable code is still Medium here. If someone adds the feature and
+    drops the rule, the reports quietly become a CVSS dump. Hence a check rather than a paragraph.
+
+    nvd-enrich.sh deliberately stays out of the TOOLS dict: check_tool_probes requires a literal
+    'command -v <binary>' line, and this script is invoked by relative path, never resolved on
+    PATH."""
+    if not (ROOT / "nvd-enrich.sh").exists():
+        fail("missing file: nvd-enrich.sh")
+
+    rel = "skills/security-review/SKILL.md"
+    text = read(rel)
+    if text is None:
+        return
+
+    if "../../nvd-enrich.sh --check" not in text:
+        fail(f"{rel}: no '../../nvd-enrich.sh --check' probe line")
+    # A bare "nvd-enrich.sh" also occurs in the probe line and in the Procedure list's "Enrich the
+    # CVEs" step, both of which precede "## Threat checklist" too -- matching that substring alone
+    # would pass with the table row deleted. The row form (`nvd-enrich.sh` inside pipe delimiters)
+    # is what makes this a *table* citation rather than any other mention.
+    if not re.search(r"\|\s*`nvd-enrich\.sh`\s*\|", text.split("## Threat checklist")[0]):
+        fail(f"{rel}: nvd-enrich.sh is not listed in the capability table")
+
+    calibration = text.split("## Severity calibration")
+    if len(calibration) < 2:
+        fail(f"{rel}: missing '## Severity calibration' section")
+    elif not re.search(r"evidence,\s*never\s*severity", calibration[1], re.I):
+        fail(f"{rel}: severity calibration must state that CVSS is evidence, never severity")
+
+    # Scoped to the Output section, where this guidance belongs, rather than split on every heading
+    # in the document: an unscoped split lets "nvd" from the probe line or the Procedure step pair
+    # with the pre-existing, unrelated "## Checks skipped" mention in Capability probe (about
+    # review-tools.sh) and pass without this guidance existing at all.
+    output = text.split("## Output")
+    if len(output) < 2:
+        fail(f"{rel}: missing '## Output' section")
+    elif not (re.search(r"\bnvd\b", output[1], re.I) and "skipped" in output[1].lower()):
+        fail(f"{rel}: 'Checks skipped' guidance does not name NVD enrichment")
+
+    proc = read("references/procedure.md")
+    if proc and "NVD:" not in proc:
+        fail("procedure.md: finding format does not carry the optional 'NVD:' line")
+
+
 CHECKS = [check_manifests, check_references, check_agent_prompt_parses,
           check_skill_frontmatter, check_tool_probes, check_checklist_coverage,
           check_vuln_anchors, check_delegation, check_trigger_distinctness,
-          check_installer_is_suggested_not_run]
+          check_installer_is_suggested_not_run, check_nvd_enrichment]
 
 
 def main():

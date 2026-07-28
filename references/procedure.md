@@ -87,6 +87,7 @@ list per `rubric.md`.
 
 [F1] Critical · Confirmed · internal/auth/session.go:112-118 · GO-01
   What:   ...
+  NVD:    CVE-2021-44228 · CVSS 10.0 Critical · CWE-917 · published 2021-12-10
   Why:    ...
   Fix:    ...
 
@@ -109,6 +110,10 @@ list per `rubric.md`.
 
 <agent prompt block per agent-prompt.md, only when there is at least one finding>
 ```
+
+The `NVD:` line is optional and appears only on findings that carry a CVE. Today only
+`security-review` emits it, from `nvd-enrich.sh`. It records what NVD says; the severity on the
+first line remains this suite's own judgement, per `rubric.md`.
 
 Findings are grouped by severity, worst first. A severity with no findings is omitted; do not print
 empty headings.

@@ -22,12 +22,18 @@ Follow `../../references/procedure.md` for scoping, probing and error handling. 
 2. **Scope.** The diff for a change review, the tree for an audit. State which you used — a clean
    result on three files is not a clean result on the application.
 3. **Probe and run** the tools below.
-4. **Delegate** to every language skill that applies — `review-go`, `review-bash`, `review-vue-ts`,
+4. **Enrich the CVEs.** Collect CVE IDs from scanner output with
+   `grep -oE 'CVE-[0-9]{4}-[0-9]{4,}'` and pipe them through `../../nvd-enrich.sh`. Grepping the
+   text rather than parsing a scanner's JSON keeps this working across output-format changes and
+   across any scanner added later; the script deduplicates its own input. A CVE that comes back
+   `unavailable` is still reported as a finding, with the enrichment gap named in
+   `## Checks skipped`.
+5. **Delegate** to every language skill that applies — `review-go`, `review-bash`, `review-vue-ts`,
    `review-php` — asking each to weight its security-relevant rows (see Delegation).
-5. **Walk the threat checklist below** over every file in scope.
-6. **Score by exploitability** per `../../references/rubric.md` and the calibration note below, then
+6. **Walk the threat checklist below** over every file in scope.
+7. **Score by exploitability** per `../../references/rubric.md` and the calibration note below, then
    merge.
-7. **Emit both artifacts.**
+8. **Emit both artifacts.**
 
 ## Capability probe
 
@@ -35,6 +41,7 @@ Follow `../../references/procedure.md` for scoping, probing and error handling. 
 command -v semgrep
 command -v gitleaks
 command -v trivy
+../../nvd-enrich.sh --check
 ```
 
 | Tool | Invocation | If absent |
@@ -42,6 +49,7 @@ command -v trivy
 | `semgrep` | `semgrep --config auto --error` | `pipx install semgrep` — note that `--config auto` fetches rules, so it needs network access |
 | `gitleaks` | `gitleaks detect --no-banner --redact` | `brew install gitleaks` / download a release binary |
 | `trivy` | `trivy fs --scanners vuln,secret .` | `brew install trivy` / `apt install trivy` |
+| `nvd-enrich.sh` | `<cve-ids> \| ../../nvd-enrich.sh` | ships with the plugin, so it is always present. Needs `curl` and `jq` and network access; without an API key it runs at a reduced lookup cap |
 
 Several missing at once? The suite ships `review-tools.sh`, which probes and installs the whole
 toolchain in one pass. **Name it in `## Checks skipped` and leave running it to the user** — a review
@@ -107,6 +115,15 @@ confidence field (`Likely`, `Speculative`) rather than deflating the severity. A
 finding is a legitimate and useful thing to report; a Critical silently downgraded to Medium because
 tracing it was hard is not.
 
+**A CVSS score is evidence, never severity.** NVD scores a vulnerability in the abstract; this
+suite scores what an attacker can do in *this* codebase, and `../../references/rubric.md` makes
+reachability the deciding factor. A CVSS 9.8 in a dependency with no reachable call path is not a
+Critical finding here. Put the enriched fields on the finding's `NVD:` line and assign severity
+from the ladder above.
+
+Where the two diverge, say so in one clause. That divergence is the most auditable line in the
+report, and writing it down is what stops a scanner's number quietly becoming the verdict.
+
 ## Output
 
 Both artifacts, always:
@@ -118,6 +135,11 @@ Both artifacts, always:
 
 For any SEC-04 finding, the agent prompt block entry must say the credential requires rotation —
 otherwise a downstream agent deletes the line, reports `FIXED`, and leaves a live secret in history.
+
+When `nvd-enrich.sh` could not enrich some or all CVEs, name **NVD enrichment** in
+`## Checks skipped` with the reason the script reported on stderr: no API key and the lookup cap,
+a missing `jq` or `curl`, an unreachable network, or a refused key file. Several tools missing at
+once is what `review-tools.sh` exists for; name it there and leave running it to the user.
 
 ## Common mistakes
 

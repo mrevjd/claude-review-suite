@@ -26,3 +26,6 @@ tests/fixtures/go/fixture
 *~
 .idea/
 .vscode/
+
+# Defensive: the API key belongs in ~/.config/claude-review-suite, never in the repo
+nvd.env

@@ -81,6 +81,34 @@ Versions are read from each binary rather than assumed, falling back to the embe
 version for tools whose `--version` flag is missing or prints usage text. A tool whose version cannot
 be determined reports `unknown` rather than being silently reported as fine.
 
+### NVD enrichment
+
+`security-review` annotates every CVE its scanners find with that CVE's CVSS vector, CWE,
+publication date and NVD analysis status, using `nvd-enrich.sh`. The score is evidence in the
+finding, not the finding's severity: reachability decides severity, per `references/rubric.md`.
+
+It works with no configuration. An API key only raises the rate limit, from 5 requests per 30
+seconds to 50, which the script turns into a per-run lookup cap of 8 keyless and 50 keyed.
+
+Get a free key at https://nvd.nist.gov/developers/request-an-api-key, then:
+
+```
+mkdir -p ~/.config/claude-review-suite
+printf 'NVD_API_KEY=your-key-here\n' > ~/.config/claude-review-suite/nvd.env
+chmod 600 ~/.config/claude-review-suite/nvd.env
+```
+
+The file must be mode 600 or 400. Anything looser is refused rather than read, with the `chmod`
+printed, because a credential the whole machine can read is a finding this suite would report in
+your code. `NVD_API_KEY` in the environment takes precedence over the file, which is the easier
+route in CI.
+
+Responses cache under `~/.cache/claude-review-suite/nvd`, for 7 days normally and 24 hours while a
+record is still awaiting NVD analysis. Clear it with `rm -rf ~/.cache/claude-review-suite/nvd`.
+
+Check the setup with `./nvd-enrich.sh --check`, which reports `curl`, `jq`, key source, cache size
+and network reachability, and never prints the key itself.
+
 ## Dual output
 
 **1. A human report.** Findings grouped by severity, worst first, each with severity, confidence,
