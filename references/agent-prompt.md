@@ -38,7 +38,7 @@ Report a table: ID | FIXED | SKIPPED-STALE | SKIPPED-DISAGREE | reason.
 
 ### 1. Anchor by content, not line number
 
-Every finding carries a short literal snippet copied from the cited location — enough to be unique
+Every finding carries a short literal snippet copied from the cited location, enough to be unique
 in the file, short enough to survive reformatting. The receiving agent relocates the code by
 matching that snippet.
 
@@ -58,8 +58,8 @@ matching that snippet.
 - **Never put a patch, diff, or replacement code block in the entry.** A patch gets pasted without
   thought, which defeats the entire verification step. If you have written the fix, you have
   removed the agent's reason to read the current code.
-- `Expect:` describes an end state that the agent can check the code against — "errors propagate
-  before any return path yields a token" — not an action to perform.
+- `Expect:` describes an end state that the agent can check the code against ("errors propagate
+  before any return path yields a token"), not an action to perform.
 - Naming an API is fine (`use the two-value type assertion form`). Writing the caller's line for
   them is not.
 
@@ -78,7 +78,7 @@ get dropped.
 | Status | Meaning |
 |---|---|
 | `FIXED` | Anchor matched, finding still valid, change made. |
-| `SKIPPED-STALE` | Anchor did not match current code — the code moved, changed, or was already fixed. |
+| `SKIPPED-STALE` | Anchor did not match current code: the code moved, changed, or was already fixed. |
 | `SKIPPED-DISAGREE` | Anchor matched, but the agent judged the finding wrong, and says why. |
 
 Keep `SKIPPED-STALE` and `SKIPPED-DISAGREE` distinct. They mean opposite things about the review:
@@ -95,7 +95,7 @@ Every ID in the block must appear in the table. An ID with no row is a dropped f
 - Finding IDs match the human report exactly. `F3` in the block is `F3` above it.
 - Order follows the report: worst severity first.
 - Paths are repo-relative with an `@` prefix.
-- **No findings means no block.** Do not emit an empty block or a block that says "nothing found" —
+- **No findings means no block.** Do not emit an empty block or a block that says "nothing found":
   it invites a downstream agent to invent work.
 
 ## Validation commands

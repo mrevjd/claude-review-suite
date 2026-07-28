@@ -1,7 +1,7 @@
 # claude-review-suite
 
 Six Claude Code skills that review code for correctness and security, emit a human-readable report,
-and emit a machine-consumable prompt block a downstream coding agent can act on — with mandatory
+and emit a machine-consumable prompt block a downstream coding agent can act on, with mandatory
 re-verification, so a stale finding is never blindly applied.
 
 The suite reports. It does not auto-fix.
@@ -13,7 +13,7 @@ The suite reports. It does not auto-fix.
 /plugin install claude-review-suite@claude-review-suite
 ```
 
-Optionally install the analysers the skills probe for — see [Toolchain](#toolchain):
+Optionally install the analysers the skills probe for (see [Toolchain](#toolchain)):
 
 ```bash
 ./review-tools.sh probe      # what's present
@@ -33,14 +33,14 @@ Optionally install the analysers the skills probe for — see [Toolchain](#toolc
 
 The two entry-point skills detect the languages in the diff or tree and run every language skill that
 applies, merging all findings into one severity-ordered list. Each language skill also works
-standalone. Languages outside the four — Python, Perl, Ruby, SQL, config — fall through to the
+standalone. Languages outside the four (Python, Perl, Ruby, SQL, config) fall through to the
 general or threat checklist, and the report says so rather than passing over them in silence.
 
 ## Hybrid tooling
 
 Guidance is the baseline; tools sharpen it. Every skill probes with `command -v` before it runs
 anything, and every check that did not run is named in a `## Checks skipped` table with a reason and
-an install hint. **A tool that crashed is a skipped check, never a clean result** — "gosec found
+an install hint. **A tool that crashed is a skipped check, never a clean result**: "gosec found
 nothing" and "gosec did not run" are opposite claims, and conflating them is the most dangerous thing
 a review can do.
 
@@ -48,7 +48,7 @@ Nothing needs to be installed for a review to complete.
 
 ## Toolchain
 
-`review-tools.sh` manages the binaries the skills probe for. It is a convenience, not a dependency —
+`review-tools.sh` manages the binaries the skills probe for. It is a convenience, not a dependency:
 every skill degrades to its checklist when a tool is absent.
 
 ```bash
@@ -67,14 +67,14 @@ gitleaks       PRESENT  global  gitleaks version 8.30.1
 0 of 21 absent.
 ```
 
-**Resolution order** is global first, then project-local (`node_modules/.bin`, `vendor/bin`) — so a
+**Resolution order** is global first, then project-local (`node_modules/.bin`, `vendor/bin`), so a
 globally installed `eslint` wins over a vendored one. Set `REVIEW_TOOL_PREFER=local` to reverse that,
 which is what you want when a project pins a specific analyser version. An optional second argument
 sets the directory those project-local paths resolve against: `./review-tools.sh probe ../some-app`.
 
 **`install` writes outside the repository.** Binaries land in `/usr/local/bin`, which needs sudo; set
 `PREFIX=$HOME/.local/bin` to install without it. Upstream release binaries are preferred over distro
-packages throughout — the distro package manager is used only for `curl`, `tar` and `unzip`, where
+packages throughout: the distro package manager is used only for `curl`, `tar` and `unzip`, where
 staleness is harmless. Anything already on `PATH` is skipped, so re-running is safe.
 
 Versions are read from each binary rather than assumed, falling back to the embedded Go module
@@ -170,8 +170,8 @@ bash tests/run.sh    # structural validator + every installed linter, against th
 Each skill has known-vulnerable and known-clean fixtures, with every planted defect annotated
 `VULN: <checklist-id>`. The validator enforces that every checklist row has fixture coverage, that the
 agent prompt block parses with usable anchors, and that skill descriptions cannot contend for
-triggers. The criteria that need a live agent — severity accuracy, false-positive rate, trigger
-behaviour — are a documented manual protocol in `tests/README.md`, deliberately not claimed as
+triggers. The criteria that need a live agent (severity accuracy, false-positive rate, trigger
+behaviour) are a documented manual protocol in `tests/README.md`, deliberately not claimed as
 automated.
 
 ## Name collision

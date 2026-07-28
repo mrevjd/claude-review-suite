@@ -27,10 +27,10 @@ command -v shfmt
 | `shfmt` | `shfmt -d <files>`, with `-i <n>` set to the project's indent width | `go install mvdan.cc/sh/v3/cmd/shfmt@latest` |
 
 Several missing at once? The suite ships `review-tools.sh`, which probes and installs the whole
-toolchain in one pass. **Name it in `## Checks skipped` and leave running it to the user** — a review
+toolchain in one pass. **Name it in `## Checks skipped` and leave running it to the user**: a review
 reports, it does not install.
 
-`bash -n <file>` is the always-available floor — `bash` is the interpreter under review, so it is
+`bash -n <file>` is the always-available floor: `bash` is the interpreter under review, so it is
 present by definition. It only catches syntax errors, so it is a floor and not a substitute.
 
 `shellcheck` exits non-zero when it finds problems; that is a result. Exit 127, or a complaint about
@@ -45,7 +45,7 @@ an unsupported shebang, is a crash and belongs in `## Checks skipped`.
 | **SH-03** | `eval`, `bash -c "$var"`, `source "$user_input"`, or a command assembled into a string and then run. | The value becomes code. Any injected `;` or `$(...)` runs with the script's privileges, which for a deploy or cron script is usually root. | Use arrays for dynamic argument lists (`cmd=(rsync -a); "${cmd[@]}"`). Where a caller must select behaviour, dispatch through a `case` over a fixed allow-list. |
 | **SH-04** | `/tmp/name.$$`, `/tmp/$RANDOM`, a fixed `/tmp` path, or `mktemp` whose result is never cleaned up. | PIDs and fixed names are predictable, so a local attacker can pre-create the path as a symlink and redirect the write. An uncleaned temp dir leaks contents that were meant to be transient. | `tmp="$(mktemp -d)"` plus `trap 'rm -rf "$tmp"' EXIT`. Never construct a temp path by hand. |
 | **SH-05** | Bare command names in a script run by cron, systemd, or sudo; `PATH` assembled with a relative entry or a trailing/leading `:`; `PATH=$PATH:.`. | A writable or attacker-controlled directory earlier in `PATH` substitutes a different binary. An empty `PATH` element means the current directory. Cron's `PATH` is not the shell's, so bare names also just break. | Set an explicit `PATH` at the top, or resolve binaries once with `command -v` and fail loudly if absent. Never put `.` or an empty element in `PATH`. |
-| **SH-06** | `$1`, `$2`, `$@` used without an arity check; no `${1:?message}`; no validation of a positional that becomes a path, a host, or a command argument. | An absent argument expands to empty and the script operates on the wrong target — the classic `rm -rf "$1"/` disaster. A `../` in an unvalidated path argument escapes the intended directory. | Check `$#` and fail with usage, or use `${1:?usage: ...}`. Validate the content, not just the presence, when it becomes a path or hostname. |
+| **SH-06** | `$1`, `$2`, `$@` used without an arity check; no `${1:?message}`; no validation of a positional that becomes a path, a host, or a command argument. | An absent argument expands to empty and the script operates on the wrong target: the classic `rm -rf "$1"/` disaster. A `../` in an unvalidated path argument escapes the intended directory. | Check `$#` and fail with usage, or use `${1:?usage: ...}`. Validate the content, not just the presence, when it becomes a path or hostname. |
 | **SH-07** | `$(...)`, `${VAR}`, or unvalidated input inside `(( ))`, `$(( ))`, or `let`. | Arithmetic contexts evaluate their contents, so a value like `x[$(id)]` or `1,y=$(rm -rf /)` executes. It is command injection through a construct that looks like maths. | Validate the value matches `^-?[0-9]+$` before it reaches an arithmetic context, or use `case`/`[[ ... =~ ]]` on the string instead of arithmetic. |
 
 Beyond the checklist, also weigh: `trap` missing for a script that creates state, `cd` without

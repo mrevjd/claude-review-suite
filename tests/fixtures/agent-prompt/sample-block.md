@@ -1,7 +1,7 @@
 # Fixture: a filled agent prompt block
 
 Parsed by `tests/validate.py::check_agent_prompt_parses`. This is the machine-readability gate for
-`references/agent-prompt.md` — if a change to the template breaks the parser, this fixture fails.
+`references/agent-prompt.md`: if a change to the template breaks the parser, this fixture fails.
 Three findings across three severities, each with a usable literal anchor.
 
 ## Agent prompt

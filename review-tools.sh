@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-tools.sh — manage tooling for the code & security review skill suite.
+# review-tools.sh: manage tooling for the code & security review skill suite.
 #
 #   ./review-tools.sh probe   [dir]   capability report (default)
 #   ./review-tools.sh install [dir]   install anything missing, globally
@@ -181,7 +181,7 @@ path_warn() {
     [ -z "$dir" ] && return 0
     case ":$PATH:" in
         *":$dir:"*) ;;
-        *) warn "$label ($dir) is not on PATH — add it to your shell rc" ;;
+        *) warn "$label ($dir) is not on PATH: add it to your shell rc" ;;
     esac
 }
 
@@ -192,7 +192,7 @@ cmd_install() {
 
     # Prompt for sudo once, upfront, rather than mid-run between downloads.
     if [ -n "$SUDO" ]; then
-        say "binaries install to $PREFIX — caching sudo credentials"
+        say "binaries install to $PREFIX, caching sudo credentials"
         $SUDO -v || { warn "sudo needed to write $PREFIX; set PREFIX=\$HOME/.local/bin to avoid it"; exit 1; }
     fi
 
@@ -211,7 +211,7 @@ cmd_install() {
     if have php; then
         gh_install phpstan phpstan/phpstan "phpstan\.phar$" || true
     else
-        warn "php absent — skipping phpstan"
+        warn "php absent: skipping phpstan"
     fi
 
     # --- Go analysers ------------------------------------------------------
@@ -237,7 +237,7 @@ cmd_install() {
         done
         rm -rf "$gotmp"
     else
-        warn "go absent — skipping staticcheck/gosec/govulncheck/errcheck."
+        warn "go absent: skipping staticcheck/gosec/govulncheck/errcheck."
         warn "Distro Go is usually stale; get current from https://go.dev/dl/"
     fi
 
@@ -253,7 +253,7 @@ cmd_install() {
         done
         path_warn "$(bun pm bin -g 2>/dev/null || true)" "bun global bin dir"
     else
-        warn "bun absent — skipping tsc/eslint/knip"
+        warn "bun absent: skipping tsc/eslint/knip"
     fi
 
     # --- security scanners -------------------------------------------------
@@ -272,7 +272,7 @@ cmd_install() {
 
     # --- composer (optional now phpstan is a phar) -------------------------
     if ! have php; then
-        warn "php absent — skipping composer"
+        warn "php absent: skipping composer"
     elif have composer; then
         skip composer
     else
@@ -283,7 +283,7 @@ cmd_install() {
         rm -f /tmp/composer-setup.php /tmp/composer
     fi
 
-    printf '\n'; say "install pass complete — re-probing:"; printf '\n'
+    printf '\n'; say "install pass complete, re-probing:"; printf '\n'
     cmd_probe
 }
 

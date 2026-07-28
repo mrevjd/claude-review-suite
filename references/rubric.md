@@ -5,7 +5,7 @@ Vue finding sit in one merged list without the reader having to guess whose scal
 
 ## Severity
 
-Severity answers "how bad is the consequence, and how reachable is it?" — not "how ugly is the
+Severity answers "how bad is the consequence, and how reachable is it?", not "how ugly is the
 code".
 
 | Level | Meaning | Typical examples |
@@ -26,7 +26,7 @@ Rules:
 
 ## Confidence
 
-Confidence answers "how sure am I that this finding is real?" It is orthogonal to severity — a
+Confidence answers "how sure am I that this finding is real?" It is orthogonal to severity: a
 Critical/Speculative finding is legitimate and useful.
 
 | Level | Meaning |
@@ -72,19 +72,19 @@ Each finding is one entry with these parts, in this order:
 
 Anti-patterns in findings:
 
-- A "What" that restates the checklist row instead of the code (`GO-06 ignored error` — where?).
+- A "What" that restates the checklist row instead of the code (`GO-06 ignored error`, where?).
 - A "Why" that stops at the category (`this is a security risk`).
 - A fix that is a diff. Diffs get applied without thought; see `agent-prompt.md`.
 - A finding with no location. If it cannot be located it cannot be verified or fixed.
 
 ## One defect matching several checklist rows
 
-Checklist rows overlap by design — a data-flow row and a sink row will both match the same line.
+Checklist rows overlap by design: a data-flow row and a sink row will both match the same line.
 Three rules, and the third is the one that decides:
 
 1. **One defect is one finding**, however many rows match it. Emitting `F3` and `F4` for the same
    line inflates the count and makes the report look worse than the code is.
-2. **Attribute to the most specific row** — the one naming the sink or the consequence — and list
+2. **Attribute to the most specific row** (the one naming the sink or the consequence) and list
    the others on the same line so provenance is not lost:
 
    ```
@@ -99,9 +99,9 @@ Worked examples:
 
 | Rows matched | Same fix? | Result |
 |---|---|---|
-| `VT-05` prop crossing a trust boundary + `VT-01` reaching `v-html` | Yes — stop rendering it as HTML and both close | One finding, `VT-01 (also VT-05)` |
-| `PHP-01` superglobal into a sink + `PHP-05` SQL by concatenation | Yes — bind the parameter and both close | One finding, `PHP-05 (also PHP-01)` |
-| `GEN-01` mishandled boundary + `GEN-07` that boundary is untested | **No** — fixing the branch does not add the test, and the test is what stops it regressing | Two findings |
+| `VT-05` prop crossing a trust boundary + `VT-01` reaching `v-html` | Yes: stop rendering it as HTML and both close | One finding, `VT-01 (also VT-05)` |
+| `PHP-01` superglobal into a sink + `PHP-05` SQL by concatenation | Yes: bind the parameter and both close | One finding, `PHP-05 (also PHP-01)` |
+| `GEN-01` mishandled boundary + `GEN-07` that boundary is untested | **No**: fixing the branch does not add the test, and the test is what stops it regressing | Two findings |
 
 The same rule governs the agent prompt block: one block entry per finding, so a merged finding
 produces one entry and one row in the status table.
@@ -113,7 +113,7 @@ When an entry-point skill delegated to more than one language skill:
 1. Concatenate all findings, then **renumber `Fn` sequentially across the merged list**. No
    duplicate IDs, no per-language numbering.
 2. **Keep the checklist ID.** It is the only record of which pass found what.
-3. Drop exact duplicates — same file, same line, same defect. Note the merge if two skills phrased
+3. Drop exact duplicates: same file, same line, same defect. Note the merge if two skills phrased
    it differently and both phrasings add something.
 4. Where severities disagree, **keep the higher one** and say in the finding that assessments
    differed.
