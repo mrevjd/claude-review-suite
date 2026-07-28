@@ -248,13 +248,13 @@ chmod 600 "$KEYFILE"
 
 # Five-line coverage across --check's states: key present (env, nvd.env), key refused (via a bad
 # permission bit above, and again via an unusable stat), and key absent (comment-only, zero-byte)
-# are all asserted above. Cache-absent is exercised by every one of those too, since nothing in this
-# file has fetched anything yet at this point in the run; cache-populated and network-reachable are
-# asserted by the --check test near the end of this file, which runs after the fetch/cache sections
-# below have populated the cache. Network-unreachable has no dedicated assertion: unlike
-# resolve_key's warn(), cmd_check's curl probe redirects both stdout and stderr to /dev/null
-# regardless of whether the request succeeds or fails (nvd-enrich.sh's network probe line), so
-# there is no code path there that could add or drop a line the way resolve_key's warn() did.
+# are all asserted above. Cache state needs no dedicated assertion anywhere in this file: cmd_check
+# reports the cache with exactly one printf, unconditionally, so a missing directory, an empty one,
+# and a populated one all still produce that same single line -- just with different text inside it
+# -- and no cache state can add or remove a line. Network-unreachable has no dedicated assertion
+# either, for the same shape of reason: cmd_check's curl probe redirects both stdout and stderr to
+# /dev/null regardless of whether the request succeeds or fails, so there is no code path on that
+# branch that could add or drop a line the way resolve_key's warn() did before it was silenced.
 
 # This section is the only producer of a real key file in this suite -- every later test that
 # wants a keyed run passes NVD_API_KEY inline instead, which overrides the file regardless of its
