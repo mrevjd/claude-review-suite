@@ -48,6 +48,24 @@ chmod +x "$BOX/bin/curl"
 export CALLS="$BOX/calls.curl"
 : >"$CALLS"
 
+# --- network sentinel. cmd_check() gains a real network probe in this task, so from here on any
+# curl invocation anywhere in this suite that is not explicitly routed through the shim above must
+# still be unable to reach the real binary -- a test that forgets to put $BOX/bin ahead of it on
+# PATH is exactly the bug this file already shipped once (Task 3, main()'s live fetch). Prepending
+# this directory to the baseline PATH makes the omission harmless by construction: unshimmed calls
+# resolve here instead of to the real curl, and never touch the network either way. The "network
+# sentinel was never invoked" check at the end of this file turns a silent miss into a failure.
+mkdir -p "$BOX/sentinel"
+cat >"$BOX/sentinel/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$SENTINEL_HITS"
+exit 1
+SHIM
+chmod +x "$BOX/sentinel/curl"
+export SENTINEL_HITS="$BOX/sentinel-hits"
+: >"$SENTINEL_HITS"
+export PATH="$BOX/sentinel:$PATH"
+
 # Every test below that needs a genuinely live fetch (to check provenance, curl's argv, or a
 # fetch_cve-internal mktemp call) must start from a cache with nothing in it for the CVE it uses.
 # An earlier task tried tracking this by hand with per-call-site `rm -f` on one known cache file
@@ -114,7 +132,7 @@ SECRET="TESTKEY-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 printf '# comment line\nNVD_API_KEY=%s\n' "$SECRET" >"$KEYFILE"
 chmod 600 "$KEYFILE"
 
-out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 if grep -qE '^key +present \(nvd.env\)' <<<"$out"; then
   ok "0600 nvd.env is read"
 else
@@ -126,7 +144,7 @@ else
   ok "--check never prints the key value"
 fi
 
-out=$(printf '' | NVD_API_KEY=env-wins-key bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/bin:$PATH" NVD_API_KEY=env-wins-key bash "$SCRIPT" --check 2>&1)
 if grep -qE '^key +present \(env\)' <<<"$out"; then
   ok "\$NVD_API_KEY takes precedence over the file"
 else
@@ -134,7 +152,7 @@ else
 fi
 
 chmod 644 "$KEYFILE"
-out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 if grep -qE '^key +(absent|refused)' <<<"$out" && grep -q 'chmod 600' <<<"$out"; then
   ok "world-readable nvd.env is refused with a chmod hint"
 else
@@ -153,7 +171,7 @@ chmod 600 "$KEYFILE"
 # return, so this asserts the exit code explicitly, not just the printed text.
 printf '# comment only, no key here\n' >"$KEYFILE"
 chmod 600 "$KEYFILE"
-out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 rc=$?
 if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
   ok "comment-only 0600 nvd.env is keyless, not a crash"
@@ -163,7 +181,7 @@ fi
 
 : >"$KEYFILE"
 chmod 600 "$KEYFILE"
-out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 rc=$?
 if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
   ok "zero-byte 0600 nvd.env is keyless, not a crash"
@@ -183,7 +201,7 @@ chmod +x "$BOX/nostat/stat"
 
 printf 'NVD_API_KEY=%s\n' "$SECRET" >"$KEYFILE"
 chmod 600 "$KEYFILE"
-out=$(printf '' | PATH="$BOX/nostat:$PATH" bash "$SCRIPT" --check 2>&1)
+out=$(printf '' | PATH="$BOX/nostat:$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 rc=$?
 if [[ $rc -eq 0 ]] && grep -qE '^key +refused' <<<"$out"; then
   ok "stat unusable on both forms refuses instead of crashing"
@@ -444,6 +462,33 @@ if [[ "$backoff_used" =~ ^[0-9]{1,4}$ ]]; then
   ok "an HTTP-date-form Retry-After falls back to the sane default, not a concatenated near-eternal sleep"
 else
   bad "Retry-After date form" "computed backoff was '$backoff_used'"
+fi
+
+# ---------------------------------------------------------------- --check
+out=$(PATH="$BOX/bin:$PATH" NVD_TEST_CODE=200 bash "$SCRIPT" --check 2>&1 </dev/null)
+missing=""
+for field in curl jq key cache network; do
+  grep -qE "^$field " <<<"$out" || missing="$missing $field"
+done
+if [[ -z "$missing" ]]; then
+  ok "--check reports all five capability lines"
+else
+  bad "--check fields" "missing:$missing"
+fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines"
+else
+  bad "--check line count" "got $(wc -l <<<"$out")"
+fi
+
+# ---------------------------------------------------------------- network sentinel
+# Checked last, after every test above has run, so it catches a leak from anywhere in this file --
+# not just the six --check call sites this task found unshimmed -- rather than only the ones this
+# section happens to know about.
+if [[ -s "$SENTINEL_HITS" ]]; then
+  bad "no test reaches the real network" "sentinel curl was invoked: $(cat "$SENTINEL_HITS")"
+else
+  ok "no test in this suite reaches the real network (sentinel curl was never invoked)"
 fi
 
 echo

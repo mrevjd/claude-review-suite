@@ -190,6 +190,7 @@ rate_limit_setup() {
 
 cmd_check() {
     resolve_key
+
     local key_line
     case "$KEY_SOURCE" in
         env)      key_line="present (env)" ;;
@@ -197,7 +198,25 @@ cmd_check() {
         refused)  key_line="refused (bad permissions on $KEY_FILE; chmod 600 it)" ;;
         *)        key_line="absent (keyless mode, reduced rate limit)" ;;
     esac
-    printf '%-8s %s\n' key "$key_line"
+
+    local entries=0
+    if [ -d "$CACHE_DIR" ]; then
+        entries="$(find "$CACHE_DIR" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
+    fi
+
+    # A five second ceiling, so probing from an offline machine costs five seconds rather than
+    # hanging the review that called it.
+    local net="unreachable"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$API?cveId=CVE-2021-44228" \
+            >/dev/null 2>&1 && net="services.nvd.nist.gov reachable"
+    fi
+
+    printf '%-8s %s\n' curl    "$(command -v curl >/dev/null 2>&1 && echo present || echo absent)"
+    printf '%-8s %s\n' jq      "$(command -v jq   >/dev/null 2>&1 && echo present || echo absent)"
+    printf '%-8s %s\n' key     "$key_line"
+    printf '%-8s %s\n' cache   "$CACHE_DIR  ($entries entries)"
+    printf '%-8s %s\n' network "$net"
 }
 
 # ----------------------------------------------------------------- dispatch ---
