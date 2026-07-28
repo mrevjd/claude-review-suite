@@ -128,6 +128,51 @@ else
 fi
 chmod 600 "$KEYFILE"
 
+# A key file with no matching NVD_API_KEY= line (empty, or comments only) must resolve to the
+# normal keyless path, not crash. grep -m1 exits 1 when nothing matches; under pipefail that
+# used to kill the whole script via set -e before resolve_key() ever reached its own "no key"
+# return, so this asserts the exit code explicitly, not just the printed text.
+printf '# comment only, no key here\n' >"$KEYFILE"
+chmod 600 "$KEYFILE"
+out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+rc=$?
+if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
+  ok "comment-only 0600 nvd.env is keyless, not a crash"
+else
+  bad "comment-only key file" "exit $rc, '$out'"
+fi
+
+: >"$KEYFILE"
+chmod 600 "$KEYFILE"
+out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+rc=$?
+if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
+  ok "zero-byte 0600 nvd.env is keyless, not a crash"
+else
+  bad "zero-byte key file" "exit $rc, '$out'"
+fi
+
+# Shadow stat with a script that always fails, standing in for a stat that supports neither the
+# GNU (-c) nor the BSD (-f) form. file_mode() must yield an empty mode that the permission case
+# statement's default branch refuses, not a set -e crash before that branch ever runs.
+mkdir -p "$BOX/nostat"
+cat >"$BOX/nostat/stat" <<'SHIM'
+#!/bin/sh
+exit 1
+SHIM
+chmod +x "$BOX/nostat/stat"
+
+printf 'NVD_API_KEY=%s\n' "$SECRET" >"$KEYFILE"
+chmod 600 "$KEYFILE"
+out=$(printf '' | PATH="$BOX/nostat:$PATH" bash "$SCRIPT" --check 2>&1)
+rc=$?
+if [[ $rc -eq 0 ]] && grep -qE '^key +refused' <<<"$out"; then
+  ok "stat unusable on both forms refuses instead of crashing"
+else
+  bad "file_mode fallback" "exit $rc, '$out'"
+fi
+chmod 600 "$KEYFILE"
+
 echo
 if [[ $failures -gt 0 ]]; then
   echo "$failures nvd-enrich failure(s), $passes passed"

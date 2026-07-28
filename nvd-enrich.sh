@@ -62,7 +62,10 @@ resolve_key() {
     [ -f "$KEY_FILE" ] || return 0
 
     local mode
-    mode="$(file_mode "$KEY_FILE")"
+    # `|| true` so a stat that fails on both forms yields an empty mode and falls through to the
+    # case default below, which refuses. Without it, set -e kills the script instead of refusing,
+    # and the permission guard silently becomes a crash on any platform stat does not support.
+    mode="$(file_mode "$KEY_FILE" || true)"
     # Refuse rather than read-and-warn: SEC-04 treats a readable credential as a finding, so
     # honouring one anyway would teach the reader that the warning is ignorable.
     case "$mode" in
@@ -74,7 +77,10 @@ resolve_key() {
             ;;
     esac
 
-    API_KEY="$(grep -m1 '^NVD_API_KEY=' "$KEY_FILE" 2>/dev/null | cut -d= -f2-)"
+    # `|| true` is load-bearing: grep exits 1 when nothing matches, pipefail promotes that to the
+    # pipeline's status, and set -e would then kill the script on a key file that is empty or holds
+    # only comments. An empty API_KEY is the intended signal for that case, not a crash.
+    API_KEY="$(grep -m1 '^NVD_API_KEY=' "$KEY_FILE" 2>/dev/null | cut -d= -f2- || true)"
     # Strip surrounding quotes, stray whitespace and a CRLF carriage return.
     API_KEY="$(printf '%s' "$API_KEY" | tr -d '\r' | sed -e 's/^[[:space:]]*//' \
         -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
