@@ -178,11 +178,19 @@ fi
 chmod 600 "$KEYFILE"
 
 # ---------------------------------------------------------------- fetch and parse
+# CACHE_ENTRY is the on-disk cache file the "invalid CVE ID" test above already populated by
+# fetching CVE-2021-44228 with scored.json. The tests below each need a real, uncached fetch to
+# prove what they claim (a live parse, a key that never reaches curl's argv, a mktemp failure
+# inside fetch_cve), so each clears this entry first -- otherwise a leftover cache hit would skip
+# fetch_cve entirely and let a broken fetch path pass unnoticed.
+CACHE_ENTRY="$XDG_CACHE_HOME/claude-review-suite/nvd/CVE-2021-44228.json"
+
 # jq normalizes JSON numbers to their shortest round-trip decimal form: a whole-number double such
 # as 10.0 always prints as "10", never "10.0", in every jq version (this is not the jq 1.7 literal-
 # number-preservation feature, which only applies to values that cannot round-trip through a
 # double). scored.json's baseScore is CVE-2021-44228's real, published CVSS score, so "10" here is
 # the correct output for that value, not a bug in parse_response.
+rm -f "$CACHE_ENTRY"
 expected=$(printf 'CVE-2021-44228\t10\tCRITICAL\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H\tCWE-917\t2021-12-10\tModified\tlive')
 row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/scored.json" NVD_TEST_CODE=200 bash "$SCRIPT" 2>/dev/null)
@@ -193,6 +201,9 @@ else
 fi
 
 # The key must reach curl through a config file, never argv: /proc/<pid>/cmdline is world-readable.
+# The "scored row" test just above leaves a fresh cache entry behind; cleared again here so this
+# run also goes through fetch_cve rather than short-circuiting on a cache hit before curl even runs.
+rm -f "$CACHE_ENTRY"
 : >"$CALLS"
 printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" >/dev/null 2>&1
@@ -241,12 +252,48 @@ fi
 exec "$REAL_MKTEMP" "\$@"
 SHIM
 chmod +x "$BOX/failcfg/mktemp"
+# The "key on argv" test above left a fresh cache entry behind too; without clearing it, this run
+# would hit the cache, never call fetch_cve or its cfg mktemp, and this test would pass for free.
+rm -f "$CACHE_ENTRY"
 err=$(printf 'CVE-2021-44228\n' | PATH="$BOX/failcfg:$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>&1 >/dev/null)
 if grep -q 'could not create the key config file' <<<"$err"; then
   ok "a failed key-config mktemp warns instead of silently going keyless"
 else
   bad "cfg mktemp fallback" "stderr: '$err'"
+fi
+
+# ---------------------------------------------------------------- cache
+: >"$CALLS"
+printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" >/dev/null 2>&1
+first_calls=$(wc -l <"$CALLS")
+row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>/dev/null)
+second_calls=$(wc -l <"$CALLS")
+if [[ "$row" == *$'\t'cache ]] && [[ "$first_calls" -eq "$second_calls" ]]; then
+  ok "a cached CVE is served from disk without a second request"
+else
+  bad "cache hit" "provenance '${row##*$'\t'}', calls $first_calls then $second_calls"
+fi
+
+row=$(printf 'CVE-2026-11111\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/awaiting.json" bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == *$'\t'"Awaiting Analysis"$'\t'live ]] && [[ "$row" == *$'\t-\t-\t-\t'* ]]; then
+  ok "an unscored record reports its status with dashes for the metrics"
+else
+  bad "awaiting analysis" "got '$row'"
+fi
+
+# Stale plus a failed fetch must be reported as stale, not passed off as fresh.
+cached="$XDG_CACHE_HOME/claude-review-suite/nvd/CVE-2021-44228.json"
+touch -d '30 days ago' "$cached" 2>/dev/null || touch -t 202606010000 "$cached"
+row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" NVD_TEST_CODE=500 bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == *$'\t'cache-stale ]]; then
+  ok "a failed fetch with a stale entry reports cache-stale"
+else
+  bad "stale-if-error" "provenance was '${row##*$'\t'}'"
 fi
 
 echo

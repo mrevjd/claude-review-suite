@@ -11,7 +11,6 @@ set -euo pipefail
 
 API="https://services.nvd.nist.gov/rest/json/cves/2.0"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-review-suite"
-# shellcheck disable=SC2034  # consumed by cache_path(), added in task 3
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-review-suite/nvd"
 KEY_FILE="$CONFIG_DIR/nvd.env"
 CVE_RE='^CVE-[0-9]{4}-[0-9]{4,}$'
@@ -145,6 +144,32 @@ fetch_cve() {
     printf '%s' "$code"
 }
 
+# ------------------------------------------------------------------ cache ---
+cache_path() { printf '%s/%s.json' "$CACHE_DIR" "$1"; }
+
+# TTL follows vulnStatus, because the records expected to change are exactly the ones NVD has not
+# finished analysing.
+cache_ttl() {
+    case "$1" in
+        "Awaiting Analysis"|"Undergoing Analysis"|"Received") printf '86400' ;;
+        "Rejected")                                           printf '2592000' ;;
+        *)                                                    printf '604800' ;;
+    esac
+}
+
+cache_fresh() {
+    local file="$1" status age ttl now mtime
+    [ -f "$file" ] || return 1
+    # jq exits 2 on malformed JSON, so a corrupt cache entry would otherwise kill the script.
+    status="$(jq -r '.vulnerabilities[0].cve.vulnStatus // "-"' "$file" 2>/dev/null || true)"
+    ttl="$(cache_ttl "$status")"
+    now="$(date +%s)"
+    mtime="$(stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null || true)"
+    [ -n "$mtime" ] || return 1
+    age=$((now - mtime))
+    [ "$age" -lt "$ttl" ]
+}
+
 cmd_check() {
     resolve_key
     local key_line
@@ -190,15 +215,35 @@ main() {
     fi
     trap 'rm -f "$body"' EXIT
 
+    mkdir -p "$CACHE_DIR"
+    chmod 700 "$CACHE_DIR" 2>/dev/null || true
+
     while read -r cve; do
+        local cached          # row and code are already declared above, do not redeclare them
+        cached="$(cache_path "$cve")"
+
+        if cache_fresh "$cached"; then
+            row="$(parse_response "$cached" || true)"
+            [ -n "$row" ] && { printf '%s\tcache\n' "$row"; continue; }
+        fi
+
         code="$(fetch_cve "$cve" "$body")"
         row=""
         [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
+
         if [ -n "$row" ]; then
+            cp "$body" "$cached"
             printf '%s\tlive\n' "$row"
-        else
-            printf '%s\t-\t-\t-\t-\t-\t-\tunavailable\n' "$cve"
+            continue
         fi
+
+        # The fetch failed. A stale entry is more useful than nothing, provided the row says so.
+        if [ -f "$cached" ]; then
+            row="$(parse_response "$cached" || true)"
+            [ -n "$row" ] && { printf '%s\tcache-stale\n' "$row"; continue; }
+        fi
+
+        printf '%s\t-\t-\t-\t-\t-\t-\tunavailable\n' "$cve"
     done <<<"$ids"
 }
 
