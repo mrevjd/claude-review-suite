@@ -143,6 +143,11 @@ if grep -q "$SECRET" <<<"$out"; then
 else
   ok "--check never prints the key value"
 fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines with a readable key file (2>&1)"
+else
+  bad "--check line count, key present (nvd.env)" "got $(wc -l <<<"$out")"
+fi
 
 out=$(printf '' | PATH="$BOX/bin:$PATH" NVD_API_KEY=env-wins-key bash "$SCRIPT" --check 2>&1)
 if grep -qE '^key +present \(env\)' <<<"$out"; then
@@ -150,7 +155,18 @@ if grep -qE '^key +present \(env\)' <<<"$out"; then
 else
   bad "env precedence" "'$out'"
 fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines with \$NVD_API_KEY set (2>&1)"
+else
+  bad "--check line count, key present (env)" "got $(wc -l <<<"$out")"
+fi
 
+# resolve_key's permission-refusal branch warns on stderr (nvd-enrich.sh:69-76). Every pre-existing
+# invocation in this file merges stderr with 2>&1, the same convention the brief's own --check test
+# uses, so a stray warn() here is not hypothetical: it is the only way any caller in this codebase
+# observes --check's output. cmd_check must silence resolve_key's stderr on this path specifically,
+# so the "exactly five lines" contract holds under 2>&1 even when the key file is refused, not just
+# in states where resolve_key has nothing to warn about.
 chmod 644 "$KEYFILE"
 out=$(printf '' | PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check 2>&1)
 if grep -qE '^key +(absent|refused)' <<<"$out" && grep -q 'chmod 600' <<<"$out"; then
@@ -162,6 +178,11 @@ if grep -q "$SECRET" <<<"$out"; then
   bad "key leak on refusal" "the refused key was printed anyway"
 else
   ok "a refused key is never printed"
+fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines on a refused key, not six with resolve_key's warning (2>&1)"
+else
+  bad "--check line count, key refused" "got $(wc -l <<<"$out") lines: '$out'"
 fi
 chmod 600 "$KEYFILE"
 
@@ -178,6 +199,11 @@ if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
 else
   bad "comment-only key file" "exit $rc, '$out'"
 fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines with a comment-only key file (2>&1)"
+else
+  bad "--check line count, comment-only key file" "got $(wc -l <<<"$out")"
+fi
 
 : >"$KEYFILE"
 chmod 600 "$KEYFILE"
@@ -187,6 +213,11 @@ if [[ $rc -eq 0 ]] && grep -qE '^key +absent' <<<"$out"; then
   ok "zero-byte 0600 nvd.env is keyless, not a crash"
 else
   bad "zero-byte key file" "exit $rc, '$out'"
+fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines with a zero-byte key file (2>&1)"
+else
+  bad "--check line count, zero-byte key file" "got $(wc -l <<<"$out")"
 fi
 
 # Shadow stat with a script that always fails, standing in for a stat that supports neither the
@@ -208,7 +239,22 @@ if [[ $rc -eq 0 ]] && grep -qE '^key +refused' <<<"$out"; then
 else
   bad "file_mode fallback" "exit $rc, '$out'"
 fi
+if [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check prints exactly five lines when stat is unusable and the key is refused (2>&1)"
+else
+  bad "--check line count, stat-fallback refusal" "got $(wc -l <<<"$out") lines: '$out'"
+fi
 chmod 600 "$KEYFILE"
+
+# Five-line coverage across --check's states: key present (env, nvd.env), key refused (via a bad
+# permission bit above, and again via an unusable stat), and key absent (comment-only, zero-byte)
+# are all asserted above. Cache-absent is exercised by every one of those too, since nothing in this
+# file has fetched anything yet at this point in the run; cache-populated and network-reachable are
+# asserted by the --check test near the end of this file, which runs after the fetch/cache sections
+# below have populated the cache. Network-unreachable has no dedicated assertion: unlike
+# resolve_key's warn(), cmd_check's curl probe redirects both stdout and stderr to /dev/null
+# regardless of whether the request succeeds or fails (nvd-enrich.sh's network probe line), so
+# there is no code path there that could add or drop a line the way resolve_key's warn() did.
 
 # This section is the only producer of a real key file in this suite -- every later test that
 # wants a keyed run passes NVD_API_KEY inline instead, which overrides the file regardless of its
@@ -265,7 +311,17 @@ for b in bash sh grep sed tr cut cat mktemp stat date find wc rm cp touch; do
   p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BOX/nojq/$b"
 done
 ln -sf "$BOX/bin/curl" "$BOX/nojq/curl"
-out=$(printf 'CVE-2021-44228\n' | PATH="$BOX/nojq" NVD_TEST_BODY="$FIXTURES/scored.json" \
+# This PATH replaces the baseline outright (no ":$PATH" suffix) rather than extending it, so the
+# sentinel prepended onto that baseline earlier in this file drops out here too -- the one place in
+# this suite where the "every invocation is covered by construction" property doesn't hold on its
+# own. It is harmless today only because jq is checked before curl in main(), so the script exits
+# before curl would ever run, and because the curl symlink above already points at the real shim
+# rather than nothing. Appending the sentinel here removes the reliance on both of those staying
+# true: jq is still genuinely absent (the sentinel directory has no jq in it either), so this
+# assertion's own condition is untouched, but a future edit that reorders main()'s checks or drops
+# the curl symlink now fails the "sentinel never invoked" check instead of quietly falling through
+# to the real network.
+out=$(printf 'CVE-2021-44228\n' | PATH="$BOX/nojq:$BOX/sentinel" NVD_TEST_BODY="$FIXTURES/scored.json" \
   bash "$SCRIPT" 2>/dev/null)
 rc=$?
 if [[ $rc -eq 1 && -z "$out" ]]; then

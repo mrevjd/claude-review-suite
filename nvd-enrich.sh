@@ -189,7 +189,12 @@ rate_limit_setup() {
 }
 
 cmd_check() {
-    resolve_key
+    # resolve_key's permission-refusal branch warns on stderr, which every caller of --check in this
+    # codebase merges into stdout (2>&1, the only convention this file uses). Left unguarded, a
+    # refused key file would make --check print six lines instead of the five its own contract
+    # promises. The chmod hint is not lost: the "key refused" line below already carries both the
+    # diagnosis and the remedy, so this only silences the duplicate.
+    resolve_key 2>/dev/null
 
     local key_line
     case "$KEY_SOURCE" in
