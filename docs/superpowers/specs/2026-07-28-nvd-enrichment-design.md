@@ -63,9 +63,14 @@ CVE IDs on stdin, TSV on stdout, diagnostics on stderr.
 
 ```
 $ printf 'CVE-2021-44228\nCVE-2020-8203\n' | ./nvd-enrich.sh
-CVE-2021-44228  10.0  CRITICAL  CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H  CWE-917  2021-12-10  Analyzed  live
+CVE-2021-44228  10    CRITICAL  CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H  CWE-917  2021-12-10  Analyzed  live
 CVE-2020-8203   7.4   HIGH      CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H  CWE-1321 2020-07-15  Analyzed  cache
 ```
+
+`10`, not `10.0`. `jq` renders a JSON number in its shortest round-tripping decimal form, so a
+whole-number double always prints without a fractional part and the script cannot emit `10.0`. The
+human-readable `NVD:` line in a finding may still say `CVSS 10.0`, which is how CVSS scores are
+conventionally written; the TSV column is whatever `jq` produced.
 
 Eight tab-separated columns:
 
@@ -170,17 +175,32 @@ documented in the README; there is no flag for it.
 NVD allows 5 requests per rolling 30 seconds unauthenticated and 50 with a key, and advises spacing
 requests rather than bursting.
 
-| | Spacing | Live lookups per run |
+| | Spacing | Requests per run |
 |---|---|---|
 | keyless | 6s | 8 |
 | keyed | 0.6s | 50 |
 
-Cache hits count against neither. `NVD_MAX_LOOKUPS` overrides the cap. The caps exist so that a
-repository with 200 CVEs does not silently turn a review into a twenty minute job; CVEs past the cap
-return `unavailable` with a rate-limit reason, which the report then surfaces.
+**The cap counts requests, not CVEs.** Counting CVEs looks equivalent and is not: a retry is a
+request, so a run that retried rate-limited lookups could make roughly twice the figure above,
+against an API that had already asked it to back off. Since the cap exists to bound network work, the
+thing it counts has to be the thing that touches the network.
+
+Cache hits count against it either way, since they make no request. A stale cache entry is served
+even once the budget is spent, for the same reason: reading a file already on disk is not network
+work, and discarding a cached answer at the cap costs the caller real information for nothing. It is
+also the exact case the cache was built for, a large repository reviewed more than once.
+
+`NVD_MAX_LOOKUPS` overrides the cap, and is validated: a non-numeric value is refused with a warning
+and the default kept, rather than making the comparison error out per CVE and silently removing the
+one guard between a 200-CVE repository and a twenty minute review. `NVD_MAX_LOOKUPS=0` is legal and
+means "answer from the cache, make no requests". CVEs past the cap with no cached copy return
+`unavailable` with a reason on stderr, which the report then surfaces.
 
 On HTTP 403 or 429 the script honours `Retry-After` when present, otherwise retries once after 10s
-keyed or 30s keyless, then marks all remaining CVEs `unavailable`.
+keyed or 30s keyless. **If the retry is rate-limited too, the run is over its allowance and every
+remaining CVE is marked `unavailable` without being requested.** Retrying each CVE independently
+instead makes a keyless 3-CVE batch six requests and five sleeps, roughly 100 seconds of waiting with
+no output until the end, which reads to the caller as a hung tool.
 
 ## Degradation
 
@@ -246,11 +266,17 @@ requires writing down why.
 ```
 [F3] Medium · Confirmed · package-lock.json:1204 · SEC-06
   What:  lodash 4.17.15 is vulnerable to prototype pollution via _.zipObjectDeep.
-  NVD:   CVE-2020-8203 · CVSS 7.4 High · CWE-1321 · published 2020-07-15
+  NVD:   CVE-2020-8203 · CVSS 7.4 High · CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
+         · CWE-1321 · published 2020-07-15
   Why:   Scored below NVD because no call path reaches _.zipObjectDeep with
          attacker-controlled keys; the only caller passes a literal shape.
   Fix:   Upgrade to lodash >= 4.17.19.
 ```
+
+The vector is on the line, not just the score. This example originally dropped it, which was
+backwards on this document's own argument: `AV:N/AC:H/PR:N/UI:N` is exactly the input the severity
+ladder consumes, and the bare `7.4` is exactly the number this section warns the agent will anchor
+on. Printing the anchor while withholding the reasoning input is the opposite of the intent.
 
 The `NVD:` line is the optional addition to the finding format in `references/procedure.md`
 described above, present only on findings that carry a CVE.
@@ -282,6 +308,24 @@ Checks added to `tests/validate.py`, so the guardrail is enforced rather than tr
 3. Its `## Checks skipped` guidance names NVD enrichment.
 
 If someone adds the feature and drops the guardrail, the validator fails.
+
+### What the guardrail cannot do
+
+`check_nvd_enrichment()` enforces that the calibration rule is **stated**, in three bounded places:
+that `## Severity calibration` says CVSS is evidence and never severity, that `## Procedure` actually
+invokes the script, and that `## Output` tells the reader to name a failed enrichment in
+`## Checks skipped`. That is all it enforces.
+
+It cannot enforce that reports are **calibrated**. Nothing in this suite would notice if every
+finding rendered `NVD: CVSS 9.8 Critical` beside a severity of `Critical`, with no reachable call
+path stated and no divergence clause anywhere, on every finding in every report. The one property
+that would make this feature harmful is the one property no structural check can see, because it is a
+property of judgement exercised at review time and not of text in a file.
+
+So: a green validator run is evidence that the instruction survives, not evidence that it is
+followed. Eleven passing check groups must never be read as "the reports are sound". Whether severity
+tracks reachability rather than CVSS is a live-agent question, and it belongs with the other criteria
+that `tests/README.md` documents as a manual protocol and deliberately does not claim as automated.
 
 ## Documentation
 

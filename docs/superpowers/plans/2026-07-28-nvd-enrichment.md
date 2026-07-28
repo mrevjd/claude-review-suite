@@ -16,6 +16,22 @@
 - **Shell style.** `nvd-enrich.sh` is a sibling of `review-tools.sh` and matches it: 4-space indent, `set -euo pipefail`, `# ---- section ----` banner comments.
 - **`shellcheck -S style` must pass** on `nvd-enrich.sh` and `tests/nvd-test.sh`. `tests/run.sh:171` already gates the repo's own scripts at that level and both files join that list in Task 1.
 - **No new dependencies.** `curl` and `jq` only. No Python in the runtime path.
+- **Bounded responsibilities, not a line count.** This constraint replaces an earlier "target under
+  300 lines", which measured the wrong thing. At the point that target was breached the file was 357
+  lines of which only 221 were code, the other 136 being comment and blank, and the comments are
+  exactly the "why, not what" this repo asks for: shaving them would have scored better against the
+  target while making the file worse. Worse, the number was quiet about the thing that did matter.
+  `main()`'s loop body reached 40 code lines doing eight things, and four separate defects were found
+  hiding in it, all while the file sat comfortably under budget.
+
+  So the constraint is: **no function does more than one of** input validation, key resolution,
+  response parsing, an HTTP fetch, cache freshness, per-CVE enrichment, the capability report, or
+  dispatch. `main()` reads input, sets up, loops, and reports totals; `enrich_one()` owns everything
+  that happens to a single CVE. A function that grows a second responsibility gets split, whatever the
+  file's line count is at the time. Conversely the file **stays a single executable**: `cmd_check`
+  looks like a clean seam but consumes `API`, `CACHE_DIR`, `KEY_FILE` and `resolve_key`, so splitting
+  it turns one shipped script into two files plus a shared library, which is worse for a plugin whose
+  whole distribution story is "a sibling of `review-tools.sh`".
 - **`set -e` discipline.** The script runs under `set -euo pipefail`. A function whose last
   executed command is a failed test returns non-zero, and a bare call to it then kills the script.
   Every function whose normal path can end on a false test ends with an explicit `return 0`, and
@@ -54,7 +70,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `nvd-enrich.sh` | New. The whole runtime: key resolution, cache, fetch, parse, rate limiting, `--check`. Single file, target under 300 lines. |
+| `nvd-enrich.sh` | New. The whole runtime: key resolution, cache, fetch, parse, rate limiting, `--check`. Single file, one function per responsibility (see Global Constraints). |
 | `tests/nvd-test.sh` | New. Test driver, modelled on `tests/fixtures/bash/differential.sh`: `ok`/`bad` counters, disposable `$BOX`, shimmed `curl` on `PATH`. Owns all six script-level gates so `tests/run.sh` gains one line, not six. |
 | `tests/fixtures/nvd/*.json` | New. Recorded API responses. Data only, no logic. |
 | `skills/security-review/SKILL.md` | Modify. Probe line, tool-table row, procedure step 3, calibration rule. |
