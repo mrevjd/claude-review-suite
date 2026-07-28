@@ -48,6 +48,14 @@ chmod +x "$BOX/bin/curl"
 export CALLS="$BOX/calls.curl"
 : >"$CALLS"
 
+# Every test below that needs a genuinely live fetch (to check provenance, curl's argv, or a
+# fetch_cve-internal mktemp call) must start from a cache with nothing in it for the CVE it uses.
+# An earlier task tried tracking this by hand with per-call-site `rm -f` on one known cache file
+# and still missed a case a test block later, because the invariant lived at each call site instead
+# of in one place. Wiping the whole cache directory removes the need to reason about which earlier
+# test last touched which CVE.
+fresh_cache() { rm -rf "$XDG_CACHE_HOME/claude-review-suite/nvd"; }
+
 # ---------------------------------------------------------------- input validation
 out=$(printf '' | bash "$SCRIPT" 2>/dev/null)
 rc=$?
@@ -72,7 +80,10 @@ fi
 #
 # curl is shimmed (PATH) with no NVD_TEST_BODY, so the shim leaves the response empty and every
 # row comes back "unavailable" -- this test is about the accept path (uppercase/dedup/order/drop),
-# not about fetched content, and it must never reach the real network to prove that.
+# not about fetched content, and it must never reach the real network to prove that. A pre-existing
+# cache hit for CVE-2021-44228 would print real cached data here instead of "unavailable", so this
+# starts from a cold cache rather than relying on being the first test to touch it.
+fresh_cache
 out=$(printf 'not-a-cve\ncve-2021-44228\nCve-2021-44228\nCVE-2020-8203\n' \
   | PATH="$BOX/bin:$PATH" bash "$SCRIPT" 2>/dev/null)
 rc=$?
@@ -178,19 +189,18 @@ fi
 chmod 600 "$KEYFILE"
 
 # ---------------------------------------------------------------- fetch and parse
-# CACHE_ENTRY is the on-disk cache file the "invalid CVE ID" test above already populated by
-# fetching CVE-2021-44228 with scored.json. The tests below each need a real, uncached fetch to
-# prove what they claim (a live parse, a key that never reaches curl's argv, a mktemp failure
-# inside fetch_cve), so each clears this entry first -- otherwise a leftover cache hit would skip
-# fetch_cve entirely and let a broken fetch path pass unnoticed.
-CACHE_ENTRY="$XDG_CACHE_HOME/claude-review-suite/nvd/CVE-2021-44228.json"
+# The "invalid CVE ID" test above already populated the cache for CVE-2021-44228 by fetching it
+# with scored.json. Each test below needs a real, uncached fetch to prove what it claims (a live
+# parse, a key that never reaches curl's argv, a mktemp failure inside fetch_cve), so each starts
+# from fresh_cache() -- otherwise a leftover cache hit would skip fetch_cve entirely and let a
+# broken fetch path pass unnoticed.
 
 # jq normalizes JSON numbers to their shortest round-trip decimal form: a whole-number double such
 # as 10.0 always prints as "10", never "10.0", in every jq version (this is not the jq 1.7 literal-
 # number-preservation feature, which only applies to values that cannot round-trip through a
 # double). scored.json's baseScore is CVE-2021-44228's real, published CVSS score, so "10" here is
 # the correct output for that value, not a bug in parse_response.
-rm -f "$CACHE_ENTRY"
+fresh_cache
 expected=$(printf 'CVE-2021-44228\t10\tCRITICAL\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H\tCWE-917\t2021-12-10\tModified\tlive')
 row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/scored.json" NVD_TEST_CODE=200 bash "$SCRIPT" 2>/dev/null)
@@ -203,7 +213,7 @@ fi
 # The key must reach curl through a config file, never argv: /proc/<pid>/cmdline is world-readable.
 # The "scored row" test just above leaves a fresh cache entry behind; cleared again here so this
 # run also goes through fetch_cve rather than short-circuiting on a cache hit before curl even runs.
-rm -f "$CACHE_ENTRY"
+fresh_cache
 : >"$CALLS"
 printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" >/dev/null 2>&1
@@ -254,7 +264,7 @@ SHIM
 chmod +x "$BOX/failcfg/mktemp"
 # The "key on argv" test above left a fresh cache entry behind too; without clearing it, this run
 # would hit the cache, never call fetch_cve or its cfg mktemp, and this test would pass for free.
-rm -f "$CACHE_ENTRY"
+fresh_cache
 err=$(printf 'CVE-2021-44228\n' | PATH="$BOX/failcfg:$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>&1 >/dev/null)
 if grep -q 'could not create the key config file' <<<"$err"; then
@@ -264,6 +274,11 @@ else
 fi
 
 # ---------------------------------------------------------------- cache
+# The "cfg mktemp fallback" test above left its own fresh cache entry for CVE-2021-44228 behind, so
+# without this the first invocation below would already be a cache hit and never prove the "then a
+# cache hit" half of this test's name -- it needs to start genuinely cold so the first invocation is
+# a real, populating fetch (first_calls -eq 1) and only the second is served from disk.
+fresh_cache
 : >"$CALLS"
 printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" >/dev/null 2>&1
@@ -271,7 +286,7 @@ first_calls=$(wc -l <"$CALLS")
 row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>/dev/null)
 second_calls=$(wc -l <"$CALLS")
-if [[ "$row" == *$'\t'cache ]] && [[ "$first_calls" -eq "$second_calls" ]]; then
+if [[ "$row" == *$'\t'cache ]] && [[ "$first_calls" -eq 1 ]] && [[ "$first_calls" -eq "$second_calls" ]]; then
   ok "a cached CVE is served from disk without a second request"
 else
   bad "cache hit" "provenance '${row##*$'\t'}', calls $first_calls then $second_calls"
