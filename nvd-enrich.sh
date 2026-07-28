@@ -215,8 +215,16 @@ main() {
     fi
     trap 'rm -f "$body"' EXIT
 
-    mkdir -p "$CACHE_DIR"
+    # The cache is an optimisation: this script's own header promises exit 1 only when it "could
+    # not run at all", and an unwritable cache directory is not that -- every CVE is still fetchable,
+    # just not cacheable. `|| true` on both lines means a read-only parent or similar leaves
+    # $CACHE_DIR missing or unwritable rather than aborting here via set -e; cache_fresh then finds
+    # no file for every CVE and the loop below already tolerates that as "not fresh". One warning
+    # covers the whole run, since every row would otherwise silently refetch with no visible sign.
+    mkdir -p "$CACHE_DIR" 2>/dev/null || true
     chmod 700 "$CACHE_DIR" 2>/dev/null || true
+    [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ] || \
+        warn "cache directory $CACHE_DIR is unusable, every CVE will be refetched"
 
     while read -r cve; do
         local cached          # row and code are already declared above, do not redeclare them
@@ -232,7 +240,11 @@ main() {
         [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
 
         if [ -n "$row" ]; then
-            cp "$body" "$cached"
+            # The row was already fetched and parsed successfully; only the cache write can still
+            # fail (e.g. a full disk). `|| true` keeps that failure from aborting the script via
+            # set -e here, which would otherwise discard this row and every remaining CVE in the
+            # batch over a cache miss, not a fetch failure.
+            cp "$body" "$cached" 2>/dev/null || true
             printf '%s\tlive\n' "$row"
             continue
         fi
