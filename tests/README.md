@@ -274,7 +274,7 @@ planted defect, confirm the suite goes red, restore. Results on 2026-07-25:
 | `check_vuln_anchors` (positive) | 8 | 8 |
 | `check_vuln_anchors` (`ANCHOR-ABSENT`) | 4 | 4 |
 | `check_vuln_anchors` vs *semantically correct* fixes (VT-05, SH-06) | 2 | 2 |
-| Go differential | 5 | 4 (GO-06 is anchors-only, see above) |
+| Go differential | 5 | 4 (GO-06 is anchors-only; see above) |
 | TypeScript differential | 4 | 4 |
 | Python differential | 7 | 7 |
 | Bash differential | 7 | 7 |

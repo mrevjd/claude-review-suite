@@ -73,7 +73,7 @@ Both artifacts, always:
 2. **Agent prompt block** per `../../references/agent-prompt.md`, carrying every severity from
    Critical to Low, omitted entirely when there are no findings.
 
-The block's validation line is derived from the union of the delegated probes, for a Go plus Vue/TS
+The block's validation line is derived from the union of the delegated probes. For a Go plus Vue/TS
 diff with both toolchains present: `go test ./... && bunx tsc --noEmit`. Absent binaries never
 appear.
 

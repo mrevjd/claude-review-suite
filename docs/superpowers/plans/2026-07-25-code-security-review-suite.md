@@ -385,7 +385,7 @@ Expected: exit 1, `missing file: references/rubric.md` plus the other three miss
 
 - [ ] **Step 3: Write `references/rubric.md`**
 
-Sections, in order: `## Severity` (table: level, meaning, examples: Critical = exploitable now or
+Sections, in order: `## Severity` (table: level, meaning and examples, with Critical = exploitable now or
 data loss; High = likely exploitable or wrong results in normal use; Medium = wrong under specific
 conditions, or a real maintainability hazard; Low = smell, hardening, or style with a correctness
 argument), `## Confidence` (Confirmed = verified by reading the code path or a tool reproduced it;
@@ -863,14 +863,14 @@ def check_trigger_distinctness():
         for entry in ("code-review", "security-review"):
             for pattern in patterns:
                 if re.search(pattern, descs.get(entry, "")):
-                    fail(f"{entry}: description contains language token {pattern!r} "
-                         f"(contends with {name})")
+                    fail(f"{entry}: description contains language token {pattern!r}, "
+                         f"which contends with {name}")
 
     if not re.search(r"secur|vuln|audit|exploit", descs.get("security-review", ""), re.I):
         fail("security-review: description carries no security intent words")
     if re.search(r"\bvuln|\bexploit", descs.get("code-review", ""), re.I):
-        fail("code-review: description carries security intent words "
-             "(contends with security-review)")
+        fail("code-review: description carries security intent words, which contends with "
+             "security-review")
 ```
 
 - [ ] **Step 2: Run to verify failure**
