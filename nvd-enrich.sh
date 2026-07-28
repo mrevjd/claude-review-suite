@@ -119,7 +119,7 @@ fetch_cve() {
         # `|| true` so a mktemp failure (e.g. no space left, unwritable TMPDIR) leaves cfg empty
         # and falls through to a keyless request below instead of a set -e crash: losing the key
         # for one fetch is recoverable, dying mid-batch is not.
-        cfg="$(mktemp || true)"
+        cfg="$(mktemp "${TMPDIR:-/tmp}/nvd-cfg.XXXXXX" || true)"
         if [ -n "$cfg" ]; then
             chmod 600 "$cfg"
             # `|| { ...; cfg=""; }` so a write failure (disk fills between mktemp and here) falls
@@ -227,12 +227,19 @@ main() {
     #
     # `|| true` so a mktemp failure reports cleanly through warn()/exit 1 instead of a set -e
     # crash that leaks mktemp's own stderr text without going through this script's error path.
-    body="$(mktemp || true)"
+    #
+    # Every mktemp call in this script (this one, HDRS below, and cfg in fetch_cve) uses a full
+    # path template with a distinguishing prefix rather than a bare `mktemp`. A test that needs to
+    # fail one specific allocation can then match the shimmed mktemp's argv by name (e.g. `*nvd-cfg*`)
+    # instead of counting which ordinal call it is -- a count breaks the moment a call is added,
+    # removed, or reordered anywhere in the script, silently retargeting the fault at whatever now
+    # sits in that slot.
+    body="$(mktemp "${TMPDIR:-/tmp}/nvd-body.XXXXXX" || true)"
     if [ -z "$body" ]; then
         warn "could not create a temp file"
         exit 1
     fi
-    HDRS="$(mktemp || true)"
+    HDRS="$(mktemp "${TMPDIR:-/tmp}/nvd-hdrs.XXXXXX" || true)"
     if [ -z "$HDRS" ]; then
         warn "could not create a temp file"
         exit 1
@@ -276,6 +283,14 @@ main() {
             # Most 403s carry no Retry-After, so grep exiting 1 here is the common case, not an
             # error. Without `|| true` that is a crash on the exact path this retry exists to serve.
             backoff="$(grep -i '^retry-after:' "$HDRS" 2>/dev/null | tr -dc '0-9' || true)"
+            # Retry-After may legally be an HTTP-date instead of a delta-seconds integer (RFC
+            # 7231). tr -dc '0-9' would concatenate every digit in a date into a number in the
+            # hundreds of billions, and sleeping that "successfully" is worse than crashing: the
+            # tool just hangs with no output and no diagnostic until someone kills it. Anything
+            # that isn't a short run of digits is rejected back to empty, which falls through to
+            # the sane hardcoded default below; four digits comfortably covers any real NVD value
+            # while still capping a legitimate-but-absurd header under three hours.
+            [[ "$backoff" =~ ^[0-9]{1,4}$ ]] || backoff=""
             if [ -z "$backoff" ]; then
                 backoff=30
                 [ -n "$API_KEY" ] && backoff=10

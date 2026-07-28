@@ -192,6 +192,17 @@ else
 fi
 chmod 600 "$KEYFILE"
 
+# This section is the only producer of a real key file in this suite -- every later test that
+# wants a keyed run passes NVD_API_KEY inline instead, which overrides the file regardless of its
+# contents. Nothing downstream has a legitimate reason to see this key, so the section that dirtied
+# it cleans up after itself here, structurally, rather than relying on whichever section happens to
+# run last to remember to do it. That "last section remembers" shape is exactly what went wrong
+# with the cache before fresh_cache() existed: an append-only file where every block runs after the
+# one before it, so cleanup-at-first-use-downstream silently stops covering new tests inserted in
+# between. rm here instead of a fresh_cache()-style pull helper, because unlike the cache -- where
+# different tests legitimately want a hit or a miss -- no test in this file wants a leftover key.
+rm -f "$KEYFILE"
+
 # ---------------------------------------------------------------- fetch and parse
 # The "invalid CVE ID" test above already populated the cache for CVE-2021-44228 by fetching it
 # with scored.json. Each test below needs a real, uncached fetch to prove what it claims (a live
@@ -246,24 +257,22 @@ else
 fi
 
 # A key config file that fails to build must warn, not silently send the request keyless. The
-# shim below fails mktemp only on its third call in-process: main()'s body allocation is the
-# first call, its HDRS allocation (added in Task 5, for capturing response headers) is the
-# second, and fetch_cve()'s cfg allocation is the third and must fail -- with one CVE ID on
-# stdin there is exactly one of each, so this targets only the path this test is about,
-# deterministically, with no dependence on timing or a real full disk.
+# shim below fails mktemp only when its argv names the cfg allocation specifically (nvd-enrich.sh
+# tags every mktemp call with a distinguishing template: nvd-body, nvd-hdrs, nvd-cfg), not by
+# counting which call in-process this is. A count breaks the moment a call is added, removed, or
+# reordered anywhere in the script -- or, for cfg specifically, the moment a keyed run retries and
+# calls fetch_cve (and so mktemp) a second time -- silently retargeting the fault onto whichever
+# allocation now happens to sit at that ordinal position instead of the one this test names.
 REAL_MKTEMP="$(command -v mktemp)"
 mkdir -p "$BOX/failcfg"
-rm -f "$BOX/mktemp.count"
 cat >"$BOX/failcfg/mktemp" <<SHIM
 #!/bin/sh
-n=0
-[ -f "$BOX/mktemp.count" ] && n="\$(cat "$BOX/mktemp.count")"
-n=\$((n + 1))
-printf '%s' "\$n" >"$BOX/mktemp.count"
-if [ "\$n" -eq 3 ]; then
-  echo "mktemp: no space left on device" >&2
-  exit 1
-fi
+case "\$*" in
+  *nvd-cfg*)
+    echo "mktemp: no space left on device" >&2
+    exit 1
+    ;;
+esac
 exec "$REAL_MKTEMP" "\$@"
 SHIM
 chmod +x "$BOX/failcfg/mktemp"
@@ -339,15 +348,8 @@ else
 fi
 
 # ---------------------------------------------------------------- unresolvable input
-# The key resolution block above leaves $KEYFILE populated at 0600 with a real-looking secret and
-# never clears it, so without this every test from here on resolves a key by accident and runs
-# rate_limit_setup() in keyed mode (SPACING=0.6, MAX_LOOKUPS=50, backoff default 10) instead of the
-# keyless mode this section's numbers assume (SPACING=6, MAX_LOOKUPS=8, backoff default 30). None
-# of the assertions below currently depend on that distinction -- NVD_MAX_LOOKUPS overrides the cap
-# regardless of key state, and Retry-After outranks the hardcoded backoff default either way -- but
-# leaving it in place would silently mislabel every test after this point as keyless when it is not.
-rm -f "$KEYFILE"
-
+# Keyless from here on: the key-resolution section above now cleans up its own $KEYFILE when it
+# finishes, so every test below runs in genuine keyless mode without needing to know that history.
 row=$(printf 'CVE-2099-99999\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/empty.json" NVD_TEST_CODE=200 bash "$SCRIPT" 2>/dev/null)
 rc=$?
@@ -404,12 +406,44 @@ SHIM
 chmod +x "$BOX/bin/curl"
 
 : >"$CALLS"
+SECONDS=0
 err=$(printf 'CVE-2020-0006\n' | PATH="$BOX/bin:$PATH" NVD_TEST_CODE=403 \
   NVD_TEST_RETRY_AFTER=1 NVD_TEST_BODY="$FIXTURES/empty.json" bash "$SCRIPT" 2>&1 >/dev/null)
-if [[ $(wc -l <"$CALLS") -eq 2 ]] && grep -qi 'rate' <<<"$err"; then
+elapsed=$SECONDS
+# Call count and the "rate" text on stderr are both still true if the code ignored Retry-After and
+# fell through to its hardcoded 10s/30s default -- only the elapsed time tells the two apart. The
+# bound is well above the 1s this run should take and well below the 10s/30s default, so it is
+# tight enough to catch a regression to the hardcoded value without making a correct run flaky.
+if [[ $(wc -l <"$CALLS") -eq 2 ]] && grep -qi 'rate' <<<"$err" && [[ "$elapsed" -lt 4 ]]; then
   ok "a 403 is retried once, honouring Retry-After, then reported"
 else
-  bad "rate-limit retry" "$(wc -l <"$CALLS") call(s), stderr '$err'"
+  bad "rate-limit retry" "$(wc -l <"$CALLS") call(s), ${elapsed}s elapsed, stderr '$err'"
+fi
+
+# Retry-After may legally be an HTTP-date instead of delta-seconds (RFC 7231); tr -dc would
+# otherwise concatenate every digit in the date into a sleep of hundreds of billions of seconds.
+# Proving the fallback fires by actually waiting out either the correct ~10-30s default or, on a
+# regression, the near-eternal one would make this test slow at best and hang the suite at worst,
+# so sleep itself is shimmed to record its argument instead of actually sleeping -- this asserts on
+# the exact value the retry logic decided to use, deterministically and immediately.
+cat >"$BOX/bin/sleep" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$1" >>"$SLEEPS"
+exit 0
+SHIM
+chmod +x "$BOX/bin/sleep"
+export SLEEPS="$BOX/sleeps"
+: >"$SLEEPS"
+
+: >"$CALLS"
+printf 'CVE-2020-0007\n' | PATH="$BOX/bin:$PATH" NVD_TEST_CODE=403 \
+  NVD_TEST_RETRY_AFTER='Wed, 21 Oct 2015 07:28:00 GMT' NVD_TEST_BODY="$FIXTURES/empty.json" \
+  bash "$SCRIPT" >/dev/null 2>&1
+backoff_used=$(cat "$SLEEPS")
+if [[ "$backoff_used" =~ ^[0-9]{1,4}$ ]]; then
+  ok "an HTTP-date-form Retry-After falls back to the sane default, not a concatenated near-eternal sleep"
+else
+  bad "Retry-After date form" "computed backoff was '$backoff_used'"
 fi
 
 echo
