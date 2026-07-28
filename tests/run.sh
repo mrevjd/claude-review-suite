@@ -143,6 +143,9 @@ gate "differential: TypeScript fixtures still diverge" node 1 \
 gate "differential: Go fixtures still diverge" go 1 \
   bash -c 'cd tests/fixtures/go && go test ./...'
 
+gate "nvd-enrich.sh behaves" bash 1 \
+  bash tests/nvd-test.sh
+
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
 # shellcheck disable=SC2016
 gate "node --check on TS fixtures" node "${#ts_fixtures[@]}" \
@@ -166,7 +169,7 @@ gate "shfmt formatting on clean Bash fixtures" shfmt "${#sh_clean[@]}" \
 # the same standard as the rest. The clean/vulnerable fixtures are excluded on purpose: one is
 # gated separately above, and the other is supposed to fail.
 shopt -s nullglob
-repo_scripts=(review-tools.sh tests/*.sh tests/fixtures/bash/differential.sh)
+repo_scripts=(review-tools.sh nvd-enrich.sh tests/*.sh tests/fixtures/bash/differential.sh)
 shopt -u nullglob
 gate "shellcheck on this repo's own scripts" shellcheck "${#repo_scripts[@]}" \
   shellcheck -S style "${repo_scripts[@]}"
