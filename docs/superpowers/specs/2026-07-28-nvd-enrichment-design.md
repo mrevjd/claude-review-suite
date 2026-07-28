@@ -185,7 +185,7 @@ request, so a run that retried rate-limited lookups could make roughly twice the
 against an API that had already asked it to back off. Since the cap exists to bound network work, the
 thing it counts has to be the thing that touches the network.
 
-Cache hits count against it either way, since they make no request. A stale cache entry is served
+Cache hits count against neither the cap nor the spacing delay, since they make no request. A stale cache entry is served
 even once the budget is spent, for the same reason: reading a file already on disk is not network
 work, and discarding a cached answer at the cap costs the caller real information for nothing. It is
 also the exact case the cache was built for, a large repository reviewed more than once.

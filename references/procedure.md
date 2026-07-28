@@ -95,7 +95,7 @@ list per `rubric.md`.
 
 ## Medium
 
-[F3] Medium · Confirmed · package-lock.json:1204 · SEC-06
+[F4] Medium · Confirmed · package-lock.json:1204 · SEC-06
   What:  lodash 4.17.15 is vulnerable to prototype pollution via _.zipObjectDeep.
   NVD:   CVE-2020-8203 · CVSS 7.4 High · CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
          · CWE-1321 · published 2020-07-15
@@ -125,7 +125,7 @@ It carries the CVSS **vector**, not just the score. The vector is what the reade
 severity, and it is what the severity ladder consumes; the bare number is the thing that invites
 anchoring. Printing the anchor and withholding the reasoning input is backwards.
 
-`[F3]` above is the shape to copy when this suite's severity and NVD's diverge: NVD says High, the
+`[F4]` above is the shape to copy when this suite's severity and NVD's diverge: NVD says High, the
 finding says Medium, and the `Why:` line spends one clause saying why. Writing that clause is a
 forcing function, because scoring below NVD then requires stating the reason out loud rather than
 quietly deflating a number.

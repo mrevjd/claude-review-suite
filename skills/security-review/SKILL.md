@@ -41,7 +41,7 @@ Follow `../../references/procedure.md` for scoping, probing and error handling. 
    | `CWE` | first `CWE-` value, or `-` when NVD recorded none |
    | `PUBLISHED` | `YYYY-MM-DD` |
    | `STATUS` | NVD's analysis state, not an error field. `Analyzed` and `Modified` are normal; `Awaiting Analysis` means the score may move; **`Rejected` means the CVE was withdrawn, so the finding is about the scanner flagging a withdrawn CVE, not about the dependency** |
-   | `PROVENANCE` | `live` or `cache` are current. **`cache-stale` means the lookup failed and a past-TTL copy was served, so the score may be out of date; `unavailable` means no enrichment at all.** Both go in `## Checks skipped` with the reason the script printed on stderr |
+   | `PROVENANCE` | `live` or `cache` are current. **`cache-stale` means the lookup failed and a past-TTL copy was served, so the score may be out of date; `unavailable` means no enrichment at all.** Both go in `## Checks skipped`: `unavailable` with the reason the script printed on stderr, `cache-stale` with the token itself as the reason, since the script prints nothing on stderr for a stale-served row |
 5. **Delegate** to every language skill that applies — `review-go`, `review-bash`, `review-vue-ts`,
    `review-php` — asking each to weight its security-relevant rows (see Delegation).
 6. **Walk the threat checklist below** over every file in scope.

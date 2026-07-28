@@ -114,9 +114,9 @@ the commands above or the script will never see the file you just created. The c
 `XDG_CACHE_HOME` the same way.
 
 Responses cache under `${XDG_CACHE_HOME:-$HOME/.cache}/claude-review-suite/nvd`, keyed off NVD's
-analysis status: 7 days for a record NVD has analysed, 24 hours while one is still awaiting or
-undergoing analysis, and 30 days for a rejected CVE, which will not change again. Clear it with
-`rm -rf ~/.cache/claude-review-suite/nvd`.
+analysis status: 7 days for a record NVD has analysed, 24 hours while one is still awaiting
+analysis, undergoing analysis, or newly received, and 30 days for a rejected CVE, which will not
+change again. Clear it with `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/claude-review-suite/nvd"`.
 
 Check the setup with `./nvd-enrich.sh --check`, which reports `curl`, `jq`, key source, the cache
 path with a count of cached entries, and network reachability, and never prints the key itself.

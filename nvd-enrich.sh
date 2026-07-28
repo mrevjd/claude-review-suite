@@ -428,9 +428,10 @@ enrich_one() {
     # 403 and 429 are NVD's rate-limit responses. One retry, honouring Retry-After when the response
     # carries it. A retry that is rate-limited *too* means the run is over its allowance, so every
     # remaining CVE is short-circuited rather than each paying the same backoff again: at keyless
-    # defaults a sustained 403 over a 3-CVE batch was 66 seconds of sleeping and four requests
-    # against an API that had already said back off, with no output at all until the end. The spec
-    # calls for exactly this ("then marks all remaining CVEs unavailable"); it just did not exist.
+    # defaults a sustained 403 over a 3-CVE batch was six requests and five sleeps, roughly 100
+    # seconds, against an API that had already said back off, with no output at all until the end.
+    # The spec calls for exactly this ("then marks all remaining CVEs unavailable"); it just did not
+    # exist.
     if [ "$code" = "403" ] || [ "$code" = "429" ]; then
         local backoff
         backoff="$(retry_backoff)"
