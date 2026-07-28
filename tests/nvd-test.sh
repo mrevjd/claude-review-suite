@@ -520,6 +520,278 @@ else
   bad "Retry-After date form" "computed backoff was '$backoff_used'"
 fi
 
+# ---------------------------------------------------------------- rate-limit stop
+# Every shim from here on lives in its own directory prepended ahead of $BOX/bin rather than
+# overwriting $BOX/bin/curl. Overwriting it would silently change the curl every *later* test in this
+# append-only file sees, which is the same "whichever section ran last decides" coupling that
+# fresh_cache() and the key-file cleanup above exist to remove.
+#
+# A retry that is rate-limited too means the run is over NVD's allowance, so the remaining CVEs are
+# short-circuited. Before that existed, a sustained 403 retried every CVE independently: a 3-CVE batch
+# at NVD_MAX_LOOKUPS=2 made four requests and slept 30, 6, 30 against an API that had already said
+# back off, printing nothing until the end.
+mkdir -p "$BOX/bin403"
+cat >"$BOX/bin403/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS"
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+[ -n "$out" ] && : >"$out"
+printf '403'
+exit 0
+SHIM
+chmod +x "$BOX/bin403/curl"
+
+# Deliberately left at the keyless default cap of 8 rather than the NVD_MAX_LOOKUPS=2 the defect was
+# first reported under. At a cap of 2 the cap itself bounds the run to two requests, so the run-ending
+# short-circuit and its absence are indistinguishable and this assertion cannot fail. Above the cap,
+# the two diverge sharply: stopping is 2 requests and 1 sleep, while retrying each CVE independently
+# is 6 requests and 5 sleeps (three backoffs plus two spacing waits).
+fresh_cache
+: >"$CALLS"
+: >"$SLEEPS"
+out=$(printf 'CVE-2020-0101\nCVE-2020-0102\nCVE-2020-0103\n' \
+  | PATH="$BOX/bin403:$BOX/bin:$PATH" bash "$SCRIPT" 2>"$BOX/err-403")
+# All three rows are still emitted, because one input CVE means one output row on every path.
+if [[ $(wc -l <"$CALLS") -eq 2 ]] && [[ $(wc -l <"$SLEEPS") -eq 1 ]] \
+  && [[ $(wc -l <<<"$out") -eq 3 ]] \
+  && grep -q 'remaining CVEs will not be requested' "$BOX/err-403"; then
+  ok "a retry that is rate-limited too marks the remainder unavailable instead of retrying each CVE"
+else
+  bad "rate-limit stop" "$(wc -l <"$CALLS") request(s), $(wc -l <"$SLEEPS") sleep(s), \
+$(wc -l <<<"$out") row(s), stderr '$(cat "$BOX/err-403")'"
+fi
+
+# The other half of the same change, and the half the assertion above cannot see: a retry spends
+# budget like any other request. The shim below 403s the first request and answers every later one, so
+# the retry *succeeds* and the run-ending short-circuit never fires -- the only thing left deciding the
+# outcome is whether the retry was charged. Charged: CVE-2020-0171 finds the cap of 2 already spent and
+# comes back unavailable, for two requests total. Uncharged (the old behaviour, counting CVEs): it gets
+# a third request and a live row, which is how a retrying run made roughly twice the documented cap.
+jq '.vulnerabilities[0].cve.id = "CVE-2020-0171"' "$FIXTURES/scored.json" >"$BOX/rec-0171.json"
+mkdir -p "$BOX/bin403once"
+cat >"$BOX/bin403once/curl" <<SHIM
+#!/bin/sh
+printf '%s\n' "\$*" >>"\$CALLS"
+out=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+[ -n "\$out" ] && : >"\$out"
+if [ "\$(wc -l <"\$CALLS")" -eq 1 ]; then
+  printf '403'
+  exit 0
+fi
+[ -n "\$out" ] && cp "$BOX/rec-0171.json" "\$out"
+printf '200'
+exit 0
+SHIM
+chmod +x "$BOX/bin403once/curl"
+
+fresh_cache
+: >"$CALLS"
+: >"$SLEEPS"
+rows=$(printf 'CVE-2020-0170\nCVE-2020-0171\n' | PATH="$BOX/bin403once:$BOX/bin:$PATH" \
+  NVD_MAX_LOOKUPS=2 bash "$SCRIPT" 2>/dev/null)
+if [[ $(wc -l <"$CALLS") -eq 2 ]] && [[ "$(sed -n 2p <<<"$rows")" == *$'\t'unavailable ]]; then
+  ok "a retry is charged against the request cap, so a retrying run cannot exceed the documented cap"
+else
+  bad "retry is charged" "$(wc -l <"$CALLS") request(s), rows '$rows'"
+fi
+
+# A 429 whose body dies mid-transfer: curl writes the status through -w *and* exits non-zero, so
+# nvd-enrich.sh's own `|| printf '000'` appends to what curl already printed and the capture is
+# "429000". That equalled none of the values tested downstream, so the retry the spec mandates never
+# fired on exactly the truncated response most likely to be carrying a rate limit.
+mkdir -p "$BOX/bintrunc"
+cat >"$BOX/bintrunc/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS"
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+[ -n "$out" ] && : >"$out"
+printf '429000'
+exit 18
+SHIM
+chmod +x "$BOX/bintrunc/curl"
+
+fresh_cache
+: >"$CALLS"
+printf 'CVE-2020-0160\n' | PATH="$BOX/bintrunc:$BOX/bin:$PATH" bash "$SCRIPT" >/dev/null 2>&1
+if [[ $(wc -l <"$CALLS") -eq 2 ]]; then
+  ok "a 429 whose transfer broke mid-body is still read as a 429 and retried"
+else
+  bad "truncated status code" "$(wc -l <"$CALLS") request(s), expected 2"
+fi
+
+# ---------------------------------------------------------------- unresolved diagnostics
+# skills/security-review/SKILL.md tells the agent to name NVD enrichment in "## Checks skipped" "with
+# the reason the script reported on stderr", listing an unreachable network among the reasons. A curl
+# that cannot reach the network used to produce dashed rows and a completely empty stderr, so that
+# instruction could not be followed as written.
+mkdir -p "$BOX/bindead"
+cat >"$BOX/bindead/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS"
+exit 6
+SHIM
+chmod +x "$BOX/bindead/curl"
+
+fresh_cache
+: >"$CALLS"
+err=$(printf 'CVE-2020-0111\nCVE-2020-0112\n' | PATH="$BOX/bindead:$BOX/bin:$PATH" \
+  bash "$SCRIPT" 2>&1 >/dev/null)
+if grep -q '2 CVE(s) could not be enriched' <<<"$err" && grep -q 'no response from NVD' <<<"$err"; then
+  ok "a network failure reports a count and a reason on stderr, not silence"
+else
+  bad "unresolved diagnostic" "stderr: '$err'"
+fi
+
+# ---------------------------------------------------------------- cache past the cap
+# The cap bounds *network* work, and reading a file already on disk is not network work, so a stale
+# entry must still be served once the budget is spent. Discarding it printed a dashed row for a CVE
+# the script had an answer for on disk, in the exact scenario the cache exists for: a large repository
+# reviewed more than once. NVD_MAX_LOOKUPS=0 is the sharpest form of the test, because it also asserts
+# that serving the stale row costs no request at all.
+STALE_CACHE="$XDG_CACHE_HOME/claude-review-suite/nvd"
+fresh_cache
+mkdir -p "$STALE_CACHE"
+# scored.json names CVE-2021-44228, and parse_response now refuses a record that does not name the CVE
+# it was asked about. Rewriting the id keeps this test about the stale fallback rather than about that
+# guard, which has its own assertions below.
+jq '.vulnerabilities[0].cve.id = "CVE-2020-0121"' "$FIXTURES/scored.json" \
+  >"$STALE_CACHE/CVE-2020-0121.json"
+touch -d '30 days ago' "$STALE_CACHE/CVE-2020-0121.json" 2>/dev/null \
+  || touch -t 202606010000 "$STALE_CACHE/CVE-2020-0121.json"
+: >"$CALLS"
+rows=$(printf 'CVE-2020-0120\nCVE-2020-0121\n' | PATH="$BOX/bin:$PATH" NVD_MAX_LOOKUPS=0 \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>/dev/null)
+if [[ "$(sed -n 2p <<<"$rows")" == *$'\t'cache-stale ]] \
+  && [[ "$(sed -n 1p <<<"$rows")" == *$'\t'unavailable ]] \
+  && [[ ! -s "$CALLS" ]]; then
+  ok "a stale cache entry is served past the request cap rather than discarded for a dashed row"
+else
+  bad "stale past the cap" "rows '$rows', $(wc -l <"$CALLS") request(s)"
+fi
+
+# ---------------------------------------------------------------- response identity
+# $body is one file reused for every CVE in the batch. A curl that returns 200 without writing it --
+# a transfer that died before the first body byte -- used to make the next CVE emit the *previous*
+# CVE's complete row, identical in every column including a `live` provenance, and write that record
+# to its cache file for seven days. The requested CVE vanished from the output entirely.
+jq '.vulnerabilities[0].cve.id = "CVE-2020-0130"' "$FIXTURES/scored.json" >"$BOX/rec-0130.json"
+mkdir -p "$BOX/binonce"
+cat >"$BOX/binonce/curl" <<SHIM
+#!/bin/sh
+printf '%s\n' "\$*" >>"\$CALLS"
+out=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+if [ "\$(wc -l <"\$CALLS")" -eq 1 ] && [ -n "\$out" ]; then
+  cp "$BOX/rec-0130.json" "\$out"
+fi
+printf '200'
+exit 0
+SHIM
+chmod +x "$BOX/binonce/curl"
+
+fresh_cache
+: >"$CALLS"
+rows=$(printf 'CVE-2020-0130\nCVE-2020-0131\n' | PATH="$BOX/binonce:$BOX/bin:$PATH" \
+  bash "$SCRIPT" 2>/dev/null)
+if [[ "$(sed -n 2p <<<"$rows")" == "CVE-2020-0131"$'\t-\t-\t-\t-\t-\t-\t'unavailable ]] \
+  && [[ ! -f "$STALE_CACHE/CVE-2020-0131.json" ]]; then
+  ok "a 200 that writes no body cannot emit or cache the previous CVE's record"
+else
+  bad "body reuse" "rows '$rows', cache entry for 0131 \
+$([[ -f "$STALE_CACHE/CVE-2020-0131.json" ]] && echo written || echo absent)"
+fi
+
+# $HDRS is reused across the batch exactly as $body is, and its reuse *is* independently observable,
+# because nothing cross-checks a header file against the CVE it came from the way parse_response now
+# checks the record's id. The shim below rate-limits the first CVE with a Retry-After of 1, answers its
+# retry, then rate-limits the second CVE with a response carrying no headers at all. The second CVE's
+# backoff must be the keyless default of 30, not the 1 second left behind in the file by the first.
+mkdir -p "$BOX/binhdrs"
+cat >"$BOX/binhdrs/curl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >>"$CALLS"
+dump=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -D) dump="$2"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+case "$(wc -l <"$CALLS")" in
+  1) [ -n "$dump" ] && printf 'HTTP/2 403\r\nRetry-After: 1\r\n\r\n' >"$dump"
+     printf '403' ;;
+  3) printf '403' ;;
+  *) printf '200' ;;
+esac
+exit 0
+SHIM
+chmod +x "$BOX/binhdrs/curl"
+
+fresh_cache
+: >"$CALLS"
+: >"$SLEEPS"
+printf 'CVE-2020-0180\nCVE-2020-0181\n' | PATH="$BOX/binhdrs:$BOX/bin:$PATH" \
+  bash "$SCRIPT" >/dev/null 2>&1
+# In order: the first CVE's Retry-After of 1, the 6s keyless spacing before the second CVE, then the
+# second CVE's backoff. A leaked header file makes that third value 1.
+if [[ $(wc -l <"$SLEEPS") -eq 3 ]] && [[ "$(sed -n 3p "$SLEEPS")" == "30" ]]; then
+  ok "a response carrying no Retry-After cannot inherit the previous CVE's header file"
+else
+  bad "header file reuse" "sleeps were '$(tr '\n' ' ' <"$SLEEPS")', expected '1 6 30'"
+fi
+
+# The other half of the same invariant, and the one that does not depend on any external binary
+# behaving well: the response body is not trusted to say which CVE it describes. scored.json names
+# CVE-2021-44228, so asking for anything else must produce no row from it and no cache entry.
+fresh_cache
+: >"$CALLS"
+row=$(printf 'CVE-2020-0140\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == "CVE-2020-0140"$'\t-\t-\t-\t-\t-\t-\t'unavailable ]] \
+  && [[ ! -f "$STALE_CACHE/CVE-2020-0140.json" ]]; then
+  ok "a record naming a different CVE than the one requested is refused, not emitted or cached"
+else
+  bad "response identity" "row '$row', cache entry for 0140 \
+$([[ -f "$STALE_CACHE/CVE-2020-0140.json" ]] && echo written || echo absent)"
+fi
+
+# ---------------------------------------------------------------- NVD_MAX_LOOKUPS validation
+# A non-numeric value did not degrade gracefully, it removed the cap: `[ "$n" -ge abc ]` printed
+# "integer expression expected" once per CVE and evaluated false every time, so a typo in the one
+# setting standing between a 200-CVE repository and a twenty minute review made it unbounded.
+fresh_cache
+err=$(printf 'CVE-2020-0150\n' | PATH="$BOX/bin:$PATH" NVD_MAX_LOOKUPS=abc \
+  NVD_TEST_BODY="$FIXTURES/empty.json" bash "$SCRIPT" 2>&1 >/dev/null)
+if grep -q "NVD_MAX_LOOKUPS='abc'" <<<"$err" && grep -q 'default cap of 8' <<<"$err" \
+  && ! grep -q 'integer expression expected' <<<"$err"; then
+  ok "a non-numeric NVD_MAX_LOOKUPS warns and keeps the default cap instead of disabling it"
+else
+  bad "NVD_MAX_LOOKUPS validation" "stderr: '$err'"
+fi
+
 # ---------------------------------------------------------------- --check
 out=$(PATH="$BOX/bin:$PATH" NVD_TEST_CODE=200 bash "$SCRIPT" --check 2>&1 </dev/null)
 missing=""
@@ -535,6 +807,37 @@ if [[ $(wc -l <<<"$out") -eq 5 ]]; then
   ok "--check prints exactly five lines"
 else
   bad "--check line count" "got $(wc -l <<<"$out")"
+fi
+
+# An absent curl reported as an unreachable network made two lines of the same five-line report
+# contradict each other, and sent the reader looking for a firewall over a missing binary.
+#
+# Like the "missing jq" test above, this PATH replaces the baseline outright rather than extending it,
+# so the sentinel prepended earlier drops out with it. That is unavoidable and harmless here for a
+# stronger reason than in the jq case: the whole premise of the test is that no curl binary of any
+# kind is reachable on this PATH, sentinel or real, so there is no request for a leak to escape
+# through. If a curl ever did appear on it, the assertion below would fail rather than go quiet.
+mkdir -p "$BOX/nocurl"
+for b in bash sh grep sed tr cut cat mktemp stat date find wc rm cp touch jq; do
+  p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BOX/nocurl/$b"
+done
+out=$(PATH="$BOX/nocurl" bash "$SCRIPT" --check 2>&1 </dev/null)
+if grep -qE '^curl +absent' <<<"$out" && grep -qE '^network +unknown \(curl absent\)' <<<"$out" \
+  && [[ $(wc -l <<<"$out") -eq 5 ]]; then
+  ok "--check reports an unknown network, not an unreachable one, when curl is absent"
+else
+  bad "--check network line with curl absent" "'$out'"
+fi
+
+# A trailing argument is a usage error, not something to ignore. `--check junk` silently dropping
+# "junk" hides a typo in the one command whose entire job is reporting the truth, and exit 2 is what
+# the unknown-option path already does.
+out=$(PATH="$BOX/bin:$PATH" bash "$SCRIPT" --check junk 2>&1 </dev/null)
+rc=$?
+if [[ $rc -eq 2 ]] && ! grep -qE '^curl +' <<<"$out"; then
+  ok "--check with a trailing argument exits 2 instead of ignoring it"
+else
+  bad "--check trailing argument" "exit $rc, output '$out'"
 fi
 
 # ---------------------------------------------------------------- network sentinel
