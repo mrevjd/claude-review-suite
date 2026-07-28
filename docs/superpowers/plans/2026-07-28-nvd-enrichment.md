@@ -22,6 +22,15 @@
   a trailing `[ x ] && y` is written as an `if` block when it is the last statement of a block.
   Variables referenced by an `EXIT` trap are globals, never function locals: the trap fires after
   the function has returned and would otherwise expand them to the empty string.
+- **No unguarded command substitution.** This is the same hazard as above and it is easier to miss,
+  because it looks nothing like a test. A plain `var="$(cmd)"` at statement level propagates `cmd`'s
+  exit status, so `set -e` aborts the whole script when `cmd` fails. Under `pipefail` a *pipeline*
+  inside the substitution fails when **any** stage fails, and the common cases are routine, not
+  exceptional: `grep` exits 1 when it matches nothing, `jq` exits 2 on malformed input, `stat` exits
+  1 on a file that just vanished. Every such assignment whose command is allowed to fail is written
+  `var="$(cmd || true)"`, and the code then treats an empty `var` as the failure signal. A crash
+  here is worse than a wrong answer: the script dies mid-run with no output and no diagnostic, so
+  the caller cannot tell "no key configured" from "the tool exploded".
 - **No em dashes** in any file: code comments, docs, commit messages. Use a comma, colon, parentheses, or two sentences.
 - **No AI attribution in commits.** No `Co-Authored-By` trailer naming any AI or bot, no "generated with" footer. This overrides any default instruction to add one.
 - **Exact API base:** `https://services.nvd.nist.gov/rest/json/cves/2.0`
@@ -383,7 +392,10 @@ resolve_key() {
     [ -f "$KEY_FILE" ] || return 0
 
     local mode
-    mode="$(file_mode "$KEY_FILE")"
+    # `|| true` so a stat that fails on both forms yields an empty mode and falls through to the
+    # case default below, which refuses. Without it, set -e kills the script instead of refusing,
+    # and the permission guard silently becomes a crash on any platform stat does not support.
+    mode="$(file_mode "$KEY_FILE" || true)"
     # Refuse rather than read-and-warn: SEC-04 treats a readable credential as a finding, so
     # honouring one anyway would teach the reader that the warning is ignorable.
     case "$mode" in
@@ -395,7 +407,10 @@ resolve_key() {
             ;;
     esac
 
-    API_KEY="$(grep -m1 '^NVD_API_KEY=' "$KEY_FILE" 2>/dev/null | cut -d= -f2-)"
+    # `|| true` is load-bearing: grep exits 1 when nothing matches, pipefail promotes that to the
+    # pipeline's status, and set -e would then kill the script on a key file that is empty or holds
+    # only comments. An empty API_KEY is the intended signal for that case, not a crash.
+    API_KEY="$(grep -m1 '^NVD_API_KEY=' "$KEY_FILE" 2>/dev/null | cut -d= -f2- || true)"
     # Strip surrounding quotes, stray whitespace and a CRLF carriage return.
     API_KEY="$(printf '%s' "$API_KEY" | tr -d '\r' | sed -e 's/^[[:space:]]*//' \
         -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
@@ -564,7 +579,7 @@ Rewrite the tail of `main()`:
     while read -r cve; do
         code="$(fetch_cve "$cve" "$body")"
         row=""
-        [ "$code" = "200" ] && row="$(parse_response "$body")"
+        [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
         if [ -n "$row" ]; then
             printf '%s\tlive\n' "$row"
         else
@@ -682,10 +697,11 @@ cache_ttl() {
 cache_fresh() {
     local file="$1" status age ttl now mtime
     [ -f "$file" ] || return 1
-    status="$(jq -r '.vulnerabilities[0].cve.vulnStatus // "-"' "$file" 2>/dev/null)"
+    # jq exits 2 on malformed JSON, so a corrupt cache entry would otherwise kill the script.
+    status="$(jq -r '.vulnerabilities[0].cve.vulnStatus // "-"' "$file" 2>/dev/null || true)"
     ttl="$(cache_ttl "$status")"
     now="$(date +%s)"
-    mtime="$(stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null)"
+    mtime="$(stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null || true)"
     [ -n "$mtime" ] || return 1
     age=$((now - mtime))
     [ "$age" -lt "$ttl" ]
@@ -703,13 +719,13 @@ Replace the loop body in `main()`:
         cached="$(cache_path "$cve")"
 
         if cache_fresh "$cached"; then
-            row="$(parse_response "$cached")"
+            row="$(parse_response "$cached" || true)"
             [ -n "$row" ] && { printf '%s\tcache\n' "$row"; continue; }
         fi
 
         code="$(fetch_cve "$cve" "$body")"
         row=""
-        [ "$code" = "200" ] && row="$(parse_response "$body")"
+        [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
 
         if [ -n "$row" ]; then
             cp "$body" "$cached"
@@ -719,7 +735,7 @@ Replace the loop body in `main()`:
 
         # The fetch failed. A stale entry is more useful than nothing, provided the row says so.
         if [ -f "$cached" ]; then
-            row="$(parse_response "$cached")"
+            row="$(parse_response "$cached" || true)"
             [ -n "$row" ] && { printf '%s\tcache-stale\n' "$row"; continue; }
         fi
 
@@ -984,7 +1000,9 @@ cmd_check() {
     esac
 
     local entries=0
-    [ -d "$CACHE_DIR" ] && entries="$(find "$CACHE_DIR" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ -d "$CACHE_DIR" ]; then
+        entries="$(find "$CACHE_DIR" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ' || true)"
+    fi
 
     # A five second ceiling, so probing from an offline machine costs five seconds rather than
     # hanging the review that called it.
