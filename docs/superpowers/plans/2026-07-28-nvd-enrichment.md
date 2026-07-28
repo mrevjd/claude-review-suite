@@ -22,15 +22,26 @@
   a trailing `[ x ] && y` is written as an `if` block when it is the last statement of a block.
   Variables referenced by an `EXIT` trap are globals, never function locals: the trap fires after
   the function has returned and would otherwise expand them to the empty string.
-- **No unguarded command substitution.** This is the same hazard as above and it is easier to miss,
-  because it looks nothing like a test. A plain `var="$(cmd)"` at statement level propagates `cmd`'s
-  exit status, so `set -e` aborts the whole script when `cmd` fails. Under `pipefail` a *pipeline*
-  inside the substitution fails when **any** stage fails, and the common cases are routine, not
-  exceptional: `grep` exits 1 when it matches nothing, `jq` exits 2 on malformed input, `stat` exits
-  1 on a file that just vanished. Every such assignment whose command is allowed to fail is written
+- **No unguarded command substitution.** A plain `var="$(cmd)"` at statement level propagates
+  `cmd`'s exit status to the assignment, so `set -e` in the *calling* shell aborts the script when
+  `cmd` fails. Under `pipefail` a *pipeline* inside the substitution fails when **any** stage fails,
+  and the common cases are routine, not exceptional: `grep` exits 1 when it matches nothing, `jq`
+  exits 2 on malformed input, `stat` exits 1 on a file that just vanished, `mktemp` exits 1 when it
+  cannot create a file. Every such assignment whose command is allowed to fail is written
   `var="$(cmd || true)"`, and the code then treats an empty `var` as the failure signal. A crash
   here is worse than a wrong answer: the script dies mid-run with no output and no diagnostic, so
   the caller cannot tell "no key configured" from "the tool exploded".
+
+  **Be precise about which half of that bites, because the two are often conflated.** `errexit`
+  does *not* propagate into a command-substitution subshell unless `shopt -s inherit_errexit` is
+  set, and this script does not set it. So a mid-function failure inside a function invoked as
+  `code="$(fetch_cve …)"` does **not** abort anything: the subshell carries on and only the
+  function's final exit status reaches the assignment. The hazard that is real is the assignment
+  itself, which is why the guards belong on assignments and why `resolve_key`, called bare from
+  `main`, was the one that actually crashed in testing. Guard assignments because their status
+  escapes; never rely on `set -e` to catch a failure *inside* a `$( )`, because it will not. When
+  writing a comment about this, say which of the two mechanisms is at work rather than writing
+  "set -e kills the script" over a case where it demonstrably would not.
 - **No em dashes** in any file: code comments, docs, commit messages. Use a comma, colon, parentheses, or two sentences.
 - **No AI attribution in commits.** No `Co-Authored-By` trailer naming any AI or bot, no "generated with" footer. This overrides any default instruction to add one.
 - **Exact API base:** `https://services.nvd.nist.gov/rest/json/cves/2.0`
