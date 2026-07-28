@@ -9,7 +9,6 @@
 # means the check was skipped.
 set -euo pipefail
 
-# shellcheck disable=SC2034  # consumed by fetch_cve(), added in task 2
 API="https://services.nvd.nist.gov/rest/json/cves/2.0"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-review-suite"
 # shellcheck disable=SC2034  # consumed by cache_path(), added in task 3
@@ -88,6 +87,51 @@ resolve_key() {
     return 0
 }
 
+# ------------------------------------------------------------------ parse ---
+# Metric preference: v3.1, then v4.0, then v3.0, then v2. The vector string carries its own
+# "CVSS:3.1/" or "CVSS:4.0/" prefix, so the version needs no column of its own. baseSeverity is
+# read from the metric object as well as cvssData, because CVSS v2 puts it on the former.
+parse_response() {
+    jq -r '
+      .vulnerabilities[0].cve // empty
+      | . as $c
+      | ( $c.metrics.cvssMetricV31[0] // $c.metrics.cvssMetricV40[0]
+          // $c.metrics.cvssMetricV30[0] // $c.metrics.cvssMetricV2[0] ) as $mm
+      | $mm.cvssData as $m
+      | [ $c.id,
+          ( $m.baseScore    // "-" | tostring ),
+          ( $m.baseSeverity // $mm.baseSeverity // "-" ),
+          ( $m.vectorString // "-" ),
+          ( [ $c.weaknesses[]?.description[]?.value
+              | select(startswith("CWE-")) ] | first // "-" ),
+          ( ( $c.published // "-" ) | split("T")[0] ),
+          ( $c.vulnStatus // "-" )
+        ] | @tsv
+    ' "$1" 2>/dev/null
+}
+
+# ------------------------------------------------------------------ fetch ---
+# Prints the HTTP status code; writes the body to $2. The key goes in a 0600 config file rather
+# than -H, because process arguments are world-readable on Linux. mktemp plus a cleanup trap is
+# the same SH-04 pattern this suite tells everyone else to use.
+fetch_cve() {
+    local cve="$1" out="$2" cfg="" code
+    if [ -n "$API_KEY" ]; then
+        # `|| true` so a mktemp failure (e.g. no space left, unwritable TMPDIR) leaves cfg empty
+        # and falls through to a keyless request below instead of a set -e crash: losing the key
+        # for one fetch is recoverable, dying mid-batch is not.
+        cfg="$(mktemp || true)"
+        if [ -n "$cfg" ]; then
+            chmod 600 "$cfg"
+            printf 'header = "apiKey: %s"\n' "$API_KEY" >"$cfg"
+        fi
+    fi
+    code="$(curl -sS --max-time 20 ${cfg:+--config "$cfg"} \
+        -o "$out" -w '%{http_code}' "$API?cveId=$cve" 2>/dev/null || printf '000')"
+    [ -n "$cfg" ] && rm -f "$cfg"
+    printf '%s' "$code"
+}
+
 cmd_check() {
     resolve_key
     local key_line
@@ -115,7 +159,34 @@ main() {
         exit 1
     fi
 
-    printf '%s\n' "$ids"
+    resolve_key
+    command -v jq >/dev/null 2>&1 || { warn "jq not installed"; exit 1; }
+    command -v curl >/dev/null 2>&1 || { warn "curl not installed"; exit 1; }
+
+    local cve code row
+    # body is a global, not a local. The EXIT trap fires after main has returned, so a function
+    # local would already be out of scope and the trap would expand it to the empty string,
+    # leaking the temp file.
+    #
+    # `|| true` so a mktemp failure reports cleanly through warn()/exit 1 instead of a set -e
+    # crash that leaks mktemp's own stderr text without going through this script's error path.
+    body="$(mktemp || true)"
+    if [ -z "$body" ]; then
+        warn "could not create a temp file"
+        exit 1
+    fi
+    trap 'rm -f "$body"' EXIT
+
+    while read -r cve; do
+        code="$(fetch_cve "$cve" "$body")"
+        row=""
+        [ "$code" = "200" ] && row="$(parse_response "$body" || true)"
+        if [ -n "$row" ]; then
+            printf '%s\tlive\n' "$row"
+        else
+            printf '%s\t-\t-\t-\t-\t-\t-\tunavailable\n' "$cve"
+        fi
+    done <<<"$ids"
 }
 
 main "$@"

@@ -69,10 +69,14 @@ fi
 # already-canonical CVE-2021-44228. If uppercasing were skipped, both would fail CVE_RE (which
 # requires an uppercase "CVE-" prefix) and get dropped instead of deduped, changing the output --
 # a redundant already-uppercase duplicate here would let a broken uppercase step pass unnoticed.
+#
+# curl is shimmed (PATH) with no NVD_TEST_BODY, so the shim leaves the response empty and every
+# row comes back "unavailable" -- this test is about the accept path (uppercase/dedup/order/drop),
+# not about fetched content, and it must never reach the real network to prove that.
 out=$(printf 'not-a-cve\ncve-2021-44228\nCve-2021-44228\nCVE-2020-8203\n' \
-  | bash "$SCRIPT" 2>/dev/null)
+  | PATH="$BOX/bin:$PATH" bash "$SCRIPT" 2>/dev/null)
 rc=$?
-expected=$(printf 'CVE-2021-44228\nCVE-2020-8203')
+expected=$(printf 'CVE-2021-44228\t-\t-\t-\t-\t-\t-\tunavailable\nCVE-2020-8203\t-\t-\t-\t-\t-\t-\tunavailable')
 if [[ "$out" == "$expected" && $rc -eq 0 ]]; then
   ok "accept path: uppercased, deduped, order preserved, exit 0"
 else
@@ -172,6 +176,49 @@ else
   bad "file_mode fallback" "exit $rc, '$out'"
 fi
 chmod 600 "$KEYFILE"
+
+# ---------------------------------------------------------------- fetch and parse
+# jq normalizes JSON numbers to their shortest round-trip decimal form: a whole-number double such
+# as 10.0 always prints as "10", never "10.0", in every jq version (this is not the jq 1.7 literal-
+# number-preservation feature, which only applies to values that cannot round-trip through a
+# double). scored.json's baseScore is CVE-2021-44228's real, published CVSS score, so "10" here is
+# the correct output for that value, not a bug in parse_response.
+expected=$(printf 'CVE-2021-44228\t10\tCRITICAL\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H\tCWE-917\t2021-12-10\tModified\tlive')
+row=$(printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" NVD_TEST_CODE=200 bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == "$expected" ]]; then
+  ok "scored CVE produces the expected TSV row"
+else
+  bad "scored row" "got '$row'"
+fi
+
+# The key must reach curl through a config file, never argv: /proc/<pid>/cmdline is world-readable.
+: >"$CALLS"
+printf 'CVE-2021-44228\n' | PATH="$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" >/dev/null 2>&1
+if grep -q "$SECRET" "$CALLS"; then
+  bad "key on argv" "the key appeared in curl's command line"
+else
+  ok "the key never appears on curl's command line"
+fi
+
+# A missing jq is a skipped check, not a clean result, so it must exit 1 with no rows at all.
+# PATH is rebuilt from symlinks to everything the script needs except jq; pointing PATH at a
+# directory that merely shadows jq would not work, because command -v would still find the real
+# one further along.
+mkdir -p "$BOX/nojq"
+for b in bash sh grep sed tr cut cat mktemp stat date find wc rm cp touch; do
+  p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BOX/nojq/$b"
+done
+ln -sf "$BOX/bin/curl" "$BOX/nojq/curl"
+out=$(printf 'CVE-2021-44228\n' | PATH="$BOX/nojq" NVD_TEST_BODY="$FIXTURES/scored.json" \
+  bash "$SCRIPT" 2>/dev/null)
+rc=$?
+if [[ $rc -eq 1 && -z "$out" ]]; then
+  ok "a missing jq exits 1 with no partial output"
+else
+  bad "jq absent" "exit $rc, output '$out'"
+fi
 
 echo
 if [[ $failures -gt 0 ]]; then
