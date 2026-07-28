@@ -896,7 +896,9 @@ Call `rate_limit_setup` after `resolve_key` in `main()`, declare `local lookups=
         # response carries it, then give up and let the row say "unavailable".
         if [ "$code" = "403" ] || [ "$code" = "429" ]; then
             local backoff
-            backoff="$(grep -i '^retry-after:' "$HDRS" 2>/dev/null | tr -dc '0-9')"
+            # Most 403s carry no Retry-After, so grep exiting 1 here is the common case, not an
+            # error. Without `|| true` that is a crash on the exact path this retry exists to serve.
+            backoff="$(grep -i '^retry-after:' "$HDRS" 2>/dev/null | tr -dc '0-9' || true)"
             if [ -z "$backoff" ]; then
                 backoff=30
                 [ -n "$API_KEY" ] && backoff=10
