@@ -123,7 +123,20 @@ fetch_cve() {
         cfg="$(mktemp || true)"
         if [ -n "$cfg" ]; then
             chmod 600 "$cfg"
-            printf 'header = "apiKey: %s"\n' "$API_KEY" >"$cfg"
+            # `|| { ...; cfg=""; }` so a write failure (disk fills between mktemp and here) falls
+            # back to the same keyless path as a failed mktemp, instead of a set -e crash that
+            # would bypass the warning below. rm -f clears the now-useless temp file immediately,
+            # since an empty cfg means the trap at the bottom of this function will not.
+            printf 'header = "apiKey: %s"\n' "$API_KEY" >"$cfg" || {
+                rm -f "$cfg"
+                cfg=""
+            }
+        fi
+        # A silent downgrade to keyless is worse than the crash this guards against: the caller
+        # configured a key expecting the rate limit that comes with it, so losing it without a
+        # word would look like a healthy run with no visible sign the key was ever dropped.
+        if [ -z "$cfg" ]; then
+            warn "could not create the key config file, sending $cve without your API key"
         fi
     fi
     code="$(curl -sS --max-time 20 ${cfg:+--config "$cfg"} \

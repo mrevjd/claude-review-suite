@@ -220,6 +220,35 @@ else
   bad "jq absent" "exit $rc, output '$out'"
 fi
 
+# A key config file that fails to build must warn, not silently send the request keyless. The
+# shim below fails mktemp only on its second call in-process: main()'s body allocation is the
+# first call and must still succeed, fetch_cve()'s cfg allocation is the second and must fail --
+# with one CVE ID on stdin there is exactly one of each, so this targets only the path this test
+# is about, deterministically, with no dependence on timing or a real full disk.
+REAL_MKTEMP="$(command -v mktemp)"
+mkdir -p "$BOX/failcfg"
+rm -f "$BOX/mktemp.count"
+cat >"$BOX/failcfg/mktemp" <<SHIM
+#!/bin/sh
+n=0
+[ -f "$BOX/mktemp.count" ] && n="\$(cat "$BOX/mktemp.count")"
+n=\$((n + 1))
+printf '%s' "\$n" >"$BOX/mktemp.count"
+if [ "\$n" -eq 2 ]; then
+  echo "mktemp: no space left on device" >&2
+  exit 1
+fi
+exec "$REAL_MKTEMP" "\$@"
+SHIM
+chmod +x "$BOX/failcfg/mktemp"
+err=$(printf 'CVE-2021-44228\n' | PATH="$BOX/failcfg:$BOX/bin:$PATH" NVD_API_KEY="$SECRET" \
+  NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>&1 >/dev/null)
+if grep -q 'could not create the key config file' <<<"$err"; then
+  ok "a failed key-config mktemp warns instead of silently going keyless"
+else
+  bad "cfg mktemp fallback" "stderr: '$err'"
+fi
+
 echo
 if [[ $failures -gt 0 ]]; then
   echo "$failures nvd-enrich failure(s), $passes passed"
