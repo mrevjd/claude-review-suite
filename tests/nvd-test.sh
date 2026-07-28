@@ -65,6 +65,20 @@ else
   bad "unknown flag" "exit $rc, expected 2"
 fi
 
+# The second and third lines are the same CVE ID in two different cases, neither of which is
+# already-canonical CVE-2021-44228. If uppercasing were skipped, both would fail CVE_RE (which
+# requires an uppercase "CVE-" prefix) and get dropped instead of deduped, changing the output --
+# a redundant already-uppercase duplicate here would let a broken uppercase step pass unnoticed.
+out=$(printf 'not-a-cve\ncve-2021-44228\nCve-2021-44228\nCVE-2020-8203\n' \
+  | bash "$SCRIPT" 2>/dev/null)
+rc=$?
+expected=$(printf 'CVE-2021-44228\nCVE-2020-8203')
+if [[ "$out" == "$expected" && $rc -eq 0 ]]; then
+  ok "accept path: uppercased, deduped, order preserved, exit 0"
+else
+  bad "accept path" "exit $rc, got '$out'"
+fi
+
 err=$(printf 'not-a-cve\nCVE-2021-44228\n' | PATH="$BOX/bin:$PATH" \
   NVD_TEST_BODY="$FIXTURES/scored.json" bash "$SCRIPT" 2>&1 >/dev/null)
 if grep -q 'not-a-cve' <<<"$err"; then
