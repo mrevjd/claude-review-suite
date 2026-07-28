@@ -1,4 +1,4 @@
-# Code & Security Review Skill Suite — Design
+# Code & Security Review Skill Suite: Design
 
 **Date:** 2026-07-25
 **Status:** Approved design, pending implementation plan
@@ -7,7 +7,7 @@
 
 A suite of Claude Agent Skills that review code for correctness and security,
 emit a human-readable report, and emit a machine-consumable prompt block that a
-downstream coding agent can act on — with mandatory re-verification so stale
+downstream coding agent can act on, with mandatory re-verification so stale
 findings are never blindly applied.
 
 ## Scope
@@ -18,7 +18,7 @@ language-agnostic general and security review.
 **Out of scope (deliberate):**
 - Auto-fixing. The suite reports; the human or a separate agent applies changes.
 - CI or git-hook wiring. Separable concern, bolt on later.
-- Languages outside the four above — Perl and Python fall back to the general
+- Languages outside the four above: Perl and Python fall back to the general
   reviewer, which handles them without language-specific depth.
 
 ## Package Layout
@@ -53,10 +53,10 @@ Install:
 
 ### Entry-point skills
 
-`code-review` — general correctness and maintainability. Triggers on review
+`code-review`: general correctness and maintainability. Triggers on review
 intent ("review this", "before I merge", "look over this PR").
 
-`security-review` — threat-oriented, language-agnostic. Triggers on security
+`security-review`: threat-oriented, language-agnostic. Triggers on security
 intent ("audit", "is this safe", "security review", "check for vulns").
 
 Both detect languages present in the diff or tree and delegate to the matching
@@ -115,7 +115,7 @@ All six skills reference this so findings merge coherently.
 **Severity:** Critical, High, Medium, Low.
 
 **Confidence:** Confirmed, Likely, Speculative. Exists so uncertain findings have
-a home — neither silently dropped nor overstated.
+a home, neither silently dropped nor overstated.
 
 **Finding format:** stable ID, severity, confidence, `file:line`, what is wrong,
 why it matters, concrete fix direction.
@@ -131,7 +131,7 @@ Findings grouped by severity, followed by the "checks skipped" section.
 ### 2. Agent prompt block
 
 A fenced, copy-pasteable block appended to the report, containing **all
-severities** — Critical through Low. Template lives in
+severities**, Critical through Low. Template lives in
 `references/agent-prompt.md`.
 
 ```
@@ -167,7 +167,7 @@ Report a table: ID | FIXED | SKIPPED-STALE | SKIPPED-DISAGREE | reason.
 
 4. **Mandatory status table.** Every finding ID must return a verdict. Silence is
    how findings get dropped. `SKIPPED-STALE` (code moved) and `SKIPPED-DISAGREE`
-   (agent judged the finding wrong) stay distinct — the latter is a signal about
+   (agent judged the finding wrong) stay distinct: the latter is a signal about
    review quality, and collapsing them loses it.
 
 Validation commands in the block are derived from the same capability probe the

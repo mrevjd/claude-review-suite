@@ -3,14 +3,14 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this
 > plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the `claude-review-suite` Claude Code plugin — six review skills, three shared
-reference documents, and an automated fixture-backed validator — per
+**Goal:** Build the `claude-review-suite` Claude Code plugin (six review skills, three shared
+reference documents, and an automated fixture-backed validator) per
 `docs/2026-07-25-code-security-review-suite-design.md`.
 
 **Architecture:** Content-only plugin. All behaviour lives in markdown: six `SKILL.md` files carry
 triggers, capability probes and checklists; three files under `references/` carry the machinery
 every skill shares (rubric, review procedure, agent prompt block). A dependency-free Python
-validator under `tests/` enforces the structural invariants the design names — checklist IDs are
+validator under `tests/` enforces the structural invariants the design names: checklist IDs are
 covered by fixtures, the agent prompt block parses, descriptions don't contend, no skill links to a
 reference that doesn't exist.
 
@@ -23,7 +23,7 @@ Python 3 stdlib (validator), Bash (test runner). No package manager, no dependen
 - Skill directory names, verbatim from the design: `code-review`, `security-review`, `review-go`,
   `review-bash`, `review-vue-ts`, `review-php`. Frontmatter `name` must equal directory name.
 - Frontmatter carries exactly two keys, `name` and `description`; total frontmatter ≤ 1024 chars.
-- `description` starts with `Use when`, third person, triggering conditions and symptoms only —
+- `description` starts with `Use when`, third person, triggering conditions and symptoms only,
   never a summary of the skill's workflow.
 - Skills reference each other by name (`review-go`), never with `@` path links.
 - Skills load reference files by path relative to their own directory: `../../references/<file>.md`.
@@ -62,7 +62,7 @@ Python 3 stdlib (validator), Bash (test runner). No package manager, no dependen
 | `README.md` | Install, what each skill does, the `/security-review` name-collision note. |
 
 **Deviations from the design's layout, deliberate:** `references/procedure.md` (third reference
-file — the probe/report/error-handling machinery is shared by all six skills and belongs in exactly
+file: the probe/report/error-handling machinery is shared by all six skills and belongs in exactly
 one place), `.claude-plugin/marketplace.json` (the design's documented install command requires
 it), `tests/` (the design's Testing section requires fixtures), `README.md`.
 
@@ -70,28 +70,28 @@ it), `tests/` (the design's Testing section requires fixtures), `README.md`.
 
 Fixed here so tasks written out of order agree. Every ID must be planted in a vulnerable fixture.
 
-**Go** — `GO-01` nil dereference after error · `GO-02` unchecked type assertion · `GO-03` goroutine
+**Go**: `GO-01` nil dereference after error · `GO-02` unchecked type assertion · `GO-03` goroutine
 and `context` leak · `GO-04` string-built `database/sql` query · `GO-05` `defer` inside a loop ·
 `GO-06` ignored error · `GO-07` data race on shared state.
 
-**Bash** — `SH-01` unquoted expansion / word splitting · `SH-02` missing `set -euo pipefail` ·
+**Bash**: `SH-01` unquoted expansion / word splitting · `SH-02` missing `set -euo pipefail` ·
 `SH-03` `eval` · `SH-04` unsafe temp file creation · `SH-05` PATH assumption · `SH-06` unvalidated
 positional parameter · `SH-07` command substitution in an arithmetic context.
 
-**Vue/TS** — `VT-01` `v-html` sink · `VT-02` `innerHTML` assignment · `VT-03` missing CSRF handling
+**Vue/TS**: `VT-01` `v-html` sink · `VT-02` `innerHTML` assignment · `VT-03` missing CSRF handling
 on `fetch` · `VT-04` secret in the client bundle · `VT-05` unvalidated prop crossing a trust
 boundary · `VT-06` prototype pollution · `VT-07` `any` masking a type error.
 
-**PHP** — `PHP-01` superglobal reaching a sink unvalidated · `PHP-02` `unserialize` on untrusted
+**PHP**: `PHP-01` superglobal reaching a sink unvalidated · `PHP-02` `unserialize` on untrusted
 input · `PHP-03` LFI/RFI · `PHP-04` weak session configuration · `PHP-05` SQL built by
 concatenation · `PHP-06` missing output escaping.
 
-**General (`code-review`)** — `GEN-01` unhandled edge case or off-by-one · `GEN-02` error swallowed
+**General (`code-review`)**: `GEN-01` unhandled edge case or off-by-one · `GEN-02` error swallowed
 or misreported · `GEN-03` resource not released on every path · `GEN-04` concurrency/ordering
 assumption · `GEN-05` API contract violated (caller expectations, return shape) · `GEN-06` dead or
 duplicated logic · `GEN-07` untested behaviour that a test could pin cheaply.
 
-**Security (`security-review`)** — `SEC-01` missing or bypassable authentication · `SEC-02` broken
+**Security (`security-review`)**: `SEC-01` missing or bypassable authentication · `SEC-02` broken
 authorisation / IDOR · `SEC-03` injection (SQL, command, template, path) · `SEC-04` secret in
 source or log · `SEC-05` weak crypto or bad randomness · `SEC-06` untrusted deserialisation or
 SSRF · `SEC-07` sensitive data exposure through response, log, or error.
@@ -122,10 +122,10 @@ Verbatim from the design; the validator asserts each skill lists exactly these.
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `check(name, fn)` registration and a `fail(msg)`/`ok()` reporting contract that every
-  later task's checks plug into. `SKILLS` — the list of the six skill directory names.
-  `ROOT` — repository root as a `pathlib.Path`. `read(path)` → file text.
+  later task's checks plug into. `SKILLS`: the list of the six skill directory names.
+  `ROOT`: repository root as a `pathlib.Path`. `read(path)` → file text.
 
-- [ ] **Step 1: Write the failing test — validator skeleton with manifest checks**
+- [ ] **Step 1: Write the failing test, validator skeleton with manifest checks**
 
 `tests/validate.py`:
 
@@ -259,10 +259,10 @@ Expected: exit 1, `FAIL  missing file: .claude-plugin/plugin.json` and the marke
 
 - [ ] **Step 4: Add the test runner**
 
-`tests/run.sh` — `set -euo pipefail`, run `python3 tests/validate.py`, then run any present real
+`tests/run.sh`: `set -euo pipefail`, run `python3 tests/validate.py`, then run any present real
 linter against the fixtures (`shellcheck` on `tests/fixtures/bash/*.sh`, `php -l` on
 `tests/fixtures/php/*.php`, `gofmt -e` on `tests/fixtures/go/*.go`), reporting each absent tool as
-a skipped check rather than a failure — the same discipline the skills themselves must follow.
+a skipped check rather than a failure, the same discipline the skills themselves must follow.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -385,12 +385,12 @@ Expected: exit 1, `missing file: references/rubric.md` plus the other three miss
 
 - [ ] **Step 3: Write `references/rubric.md`**
 
-Sections, in order: `## Severity` (table: level, meaning, examples — Critical = exploitable now or
+Sections, in order: `## Severity` (table: level, meaning, examples: Critical = exploitable now or
 data loss; High = likely exploitable or wrong results in normal use; Medium = wrong under specific
 conditions, or a real maintainability hazard; Low = smell, hardening, or style with a correctness
 argument), `## Confidence` (Confirmed = verified by reading the code path or a tool reproduced it;
 Likely = the pattern is present and the guard is absent, but the reachability is not fully traced;
-Speculative = worth a human look, may be a false positive — and an explicit instruction that
+Speculative = worth a human look, may be a false positive; and an explicit instruction that
 Speculative findings are reported, never dropped and never promoted), `## Finding format` (the
 `Fn` ID scheme, severity · confidence · `file:line`, what is wrong, why it matters, concrete fix
 direction, and the checklist ID that caught it), `## Merging findings from multiple skills`
@@ -401,14 +401,14 @@ duplicates, keep the higher severity when two skills disagree).
 
 Sections, in order: `## Capability probe` (`command -v <tool>` per binary before any tool runs;
 record present/absent up front; never invoke an unprobed binary), `## Language detection` (from the
-diff when one exists — `git diff --name-only` — otherwise from the tree; extension → skill map:
+diff when one exists (`git diff --name-only`), otherwise from the tree; extension → skill map:
 `.go`→review-go, `.sh`/`.bash`/`bash` shebang→review-bash, `.vue`/`.ts`/`.tsx`→review-vue-ts,
 `.php`→review-php; anything else → the general reviewer, stating that no language-specific pass
 ran), `## Review procedure` (probe → detect → run tools → walk the checklist by hand → merge →
 report), `## Report skeleton` (findings grouped by severity, then the `## Checks skipped` section
 with tool, reason, install hint), `## Error handling` (the four design cases: no tools present;
-tool exits non-zero — distinguish "found problems" from "crashed", a crash is a skipped check and
-never a clean result; language undetected; empty diff or no findings — emit the report with an
+tool exits non-zero: distinguish "found problems" from "crashed", a crash is a skipped check and
+never a clean result; language undetected; empty diff or no findings: emit the report with an
 explicit no-findings statement, still list skipped checks, emit no agent prompt block).
 
 - [ ] **Step 5: Write `references/agent-prompt.md`**
@@ -422,8 +422,8 @@ binary never appears; no block at all when there are no findings.
 
 - [ ] **Step 6: Write `tests/fixtures/agent-prompt/sample-block.md`**
 
-A filled block with three findings across three severities — reuse the design's `F1`
-(`internal/auth/session.go`) example, add a `review-vue-ts` finding and a `review-bash` finding —
+A filled block with three findings across three severities (reuse the design's `F1`
+(`internal/auth/session.go`) example, add a `review-vue-ts` finding and a `review-bash` finding),
 each with a real anchor snippet, followed by the validation command line and the status table.
 
 - [ ] **Step 7: Run to verify pass**
@@ -606,18 +606,18 @@ Body sections: `## Overview` (one paragraph: guidance is the baseline, tools sha
 `## Capability probe` (a fenced block of `command -v go staticcheck gosec govulncheck errcheck`
 style lines with the exact invocation for each present tool: `go vet ./...`, `staticcheck ./...`,
 `gosec -quiet ./...`, `govulncheck ./...`, `errcheck ./...`, and the install hint for each absent
-one) · `## Checklist` (a table: ID, what to look for, why it matters, fix direction — one row per
+one) · `## Checklist` (a table: ID, what to look for, why it matters, fix direction; one row per
 `GO-01`…`GO-07`, each row concrete enough to search for, e.g. `GO-02`: "a type assertion without
-the two-value form — `v := x.(T)` where `x` can be another type; panics at runtime and takes the
+the two-value form: `v := x.(T)` where `x` can be another type; panics at runtime and takes the
 process down; use `v, ok := x.(T)` and handle `!ok`") · `## Output` (both artifacts, per
 `../../references/rubric.md` and `../../references/agent-prompt.md`; the validation command line
-is derived from the probe — `go build ./... && go vet ./... && go test ./...` with absent tools
+is derived from the probe: `go build ./... && go vet ./... && go test ./...` with absent tools
 omitted) · `## Common mistakes` (reporting a `gosec` hit without checking reachability; calling a
 missing tool a clean result).
 
 - [ ] **Step 4: Write the Go fixtures**
 
-`tests/fixtures/go/vulnerable.go` — package `fixture`, compiles under `gofmt -e`, one planted
+`tests/fixtures/go/vulnerable.go`: package `fixture`, compiles under `gofmt -e`, one planted
 defect per ID with a `// VULN: GO-0n` comment on the offending line:
 
 | ID | Planted defect |
@@ -630,7 +630,7 @@ defect per ID with a `// VULN: GO-0n` comment on the offending line:
 | GO-06 | `json.Unmarshal(b, &v)` with the error discarded via `_ =`. |
 | GO-07 | a shared `map[string]int` written from two goroutines with no mutex. |
 
-`tests/fixtures/go/clean.go` — the same seven situations written correctly (checked errors,
+`tests/fixtures/go/clean.go`: the same seven situations written correctly (checked errors,
 two-value assertion, `defer cancel()`, parameterised query, closure-scoped `defer`, handled
 `Unmarshal` error, `sync.Mutex`-guarded map), header comment `// CLEAN-FIXTURE`.
 
@@ -639,7 +639,7 @@ two-value assertion, `defer cancel()`, parameterised query, closure-scoped `defe
 Run: `python3 tests/validate.py 2>&1 | grep -E 'review-go|fixtures/go'`
 Expected: no output (the remaining failures belong to the not-yet-written skills).
 Run: `gofmt -e tests/fixtures/go/*.go >/dev/null && go vet ./tests/fixtures/go/ ; echo "vet exit $?"`
-Expected: `gofmt` clean; `go vet` flags the vulnerable file — a non-zero exit here is the fixture
+Expected: `gofmt` clean; `go vet` flags the vulnerable file: a non-zero exit here is the fixture
 working, and `clean.go` must not be among the flagged lines.
 
 ---
@@ -651,7 +651,7 @@ working, and `clean.go` must not be among the flagged lines.
 - Create: `tests/fixtures/bash/vulnerable.sh`, `tests/fixtures/bash/clean.sh`
 
 **Interfaces:**
-- Consumes: `TOOLS["review-bash"]` and the three check functions from Task 3 — no validator changes.
+- Consumes: `TOOLS["review-bash"]` and the three check functions from Task 3; no validator changes.
 - Produces: nothing new.
 
 - [ ] **Step 1: Confirm the checks already fail for this skill**
@@ -688,9 +688,9 @@ always-available floor since `bash` is the interpreter under review.
 | SH-04 | `TMP=/tmp/build.$$` then writing to it. |
 | SH-05 | bare `curl`/`tar` calls with `PATH` assumed, plus `PATH=$PATH:.`. |
 | SH-06 | `$1` used as a path with no arity or content check. |
-| SH-07 | `if (( $(cat count.txt) > 10 ))` — unvalidated substitution inside `(( ))`. |
+| SH-07 | `if (( $(cat count.txt) > 10 ))`: unvalidated substitution inside `(( ))`. |
 
-`tests/fixtures/bash/clean.sh` — `#!/usr/bin/env bash`, `set -euo pipefail`, quoted expansions,
+`tests/fixtures/bash/clean.sh`: `#!/usr/bin/env bash`, `set -euo pipefail`, quoted expansions,
 `mktemp` with an EXIT trap, absolute or `command -v`-resolved binaries, `[[ $# -eq 1 ]]` guard,
 integer-validated arithmetic, no `eval`; header comment `# CLEAN-FIXTURE`.
 
@@ -735,13 +735,13 @@ Probe block: `command -v tsc` / `bunx tsc --noEmit`, `command -v eslint`, `comma
 
 - [ ] **Step 3: Write the Vue/TS fixtures**
 
-`vulnerable.vue` — `VT-01` `<div v-html="userBio">`; `VT-05` a `defineProps<{ html: string }>()`
+`vulnerable.vue`: `VT-01` `<div v-html="userBio">`; `VT-05` a `defineProps<{ html: string }>()`
 whose value flows straight into that sink; `VT-04` an inlined `const API_KEY = "sk_live_..."`.
-`vulnerable.ts` — `VT-02` `el.innerHTML = query`; `VT-03` a state-changing `fetch('/api/transfer',
+`vulnerable.ts`: `VT-02` `el.innerHTML = query`; `VT-03` a state-changing `fetch('/api/transfer',
 { method: 'POST' })` with no CSRF token and `credentials: 'include'`; `VT-06`
 `function merge(t: any, s: any)` assigning `t[k] = s[k]` over `__proto__`; `VT-07` a function typed
 `(r: any) => r.data.items` hiding a shape error.
-`clean.vue` / `clean.ts` — interpolation instead of `v-html`, `textContent`, a CSRF header read
+`clean.vue` / `clean.ts`: interpolation instead of `v-html`, `textContent`, a CSRF header read
 from a meta tag, key from `import.meta.env` server-side proxy note, typed props with a validator,
 `Object.hasOwn` + prototype-key rejection in the merge, a discriminated-union response type. Both
 carry a `CLEAN-FIXTURE` comment.
@@ -784,12 +784,12 @@ Probe block: `command -v php` → `php -l <files>`, `command -v phpstan` → `ph
 
 - [ ] **Step 3: Write the PHP fixtures**
 
-`vulnerable.php` — `PHP-01` `$_GET['id']` reaching a query and a shell call unvalidated; `PHP-02`
+`vulnerable.php`: `PHP-01` `$_GET['id']` reaching a query and a shell call unvalidated; `PHP-02`
 `unserialize($_COOKIE['prefs'])`; `PHP-03` `include $_GET['page'] . '.php'`; `PHP-04`
 `session_start()` with `session.cookie_httponly = 0` / no `cookie_secure` / no
 `session_regenerate_id`; `PHP-05` `"SELECT … WHERE email = '" . $_POST['email'] . "'"`; `PHP-06`
 `echo $row['name']` with no escaping.
-`clean.php` — prepared statements with bound parameters, `json_decode` instead of `unserialize`,
+`clean.php`: prepared statements with bound parameters, `json_decode` instead of `unserialize`,
 an allow-list for the include target, hardened session cookie params plus
 `session_regenerate_id(true)`, `htmlspecialchars(..., ENT_QUOTES, 'UTF-8')` on output;
 `// CLEAN-FIXTURE` header. Must pass `php -l`.
@@ -797,7 +797,7 @@ an allow-list for the include target, hardened session cookie params plus
 - [ ] **Step 4: Run to verify pass**
 
 Run: `python3 tests/validate.py 2>&1 | grep -E 'review-php|fixtures/php' ; php -l tests/fixtures/php/clean.php && php -l tests/fixtures/php/vulnerable.php`
-Expected: no grep output; both files report "No syntax errors detected" — the fixtures are
+Expected: no grep output; both files report "No syntax errors detected": the fixtures are
 vulnerable, not broken.
 
 ---
@@ -812,7 +812,7 @@ vulnerable, not broken.
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–3.
-- Produces: the delegation contract — each entry point names all four language skills by bare name
+- Produces: the delegation contract. Each entry point names all four language skills by bare name
   and links `../../references/procedure.md` for detection.
 
 - [ ] **Step 1: Write the failing checks**
@@ -863,14 +863,14 @@ def check_trigger_distinctness():
         for entry in ("code-review", "security-review"):
             for pattern in patterns:
                 if re.search(pattern, descs.get(entry, "")):
-                    fail(f"{entry}: description contains language token {pattern!r} — "
-                         f"contends with {name}")
+                    fail(f"{entry}: description contains language token {pattern!r} "
+                         f"(contends with {name})")
 
     if not re.search(r"secur|vuln|audit|exploit", descs.get("security-review", ""), re.I):
         fail("security-review: description carries no security intent words")
     if re.search(r"\bvuln|\bexploit", descs.get("code-review", ""), re.I):
-        fail("code-review: description carries security intent words — contends with "
-             "security-review")
+        fail("code-review: description carries security intent words "
+             "(contends with security-review)")
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -919,13 +919,13 @@ by an untrusted actor drives severity, not code ugliness.
 
 - [ ] **Step 5: Write the general and security fixtures**
 
-`tests/fixtures/general/vulnerable.py` — Python, so it also exercises the design's
+`tests/fixtures/general/vulnerable.py`: Python, so it also exercises the design's
 "non-supported language falls back to the general reviewer" path. One planted defect per
 `GEN-01`…`GEN-07`: an off-by-one slice; `except Exception: pass`; a file opened without a context
 manager on an early-return path; a module-level mutable cache mutated from a thread; a function
 documented as returning a list that returns `None` on one branch; a duplicated fee calculation that
 disagrees with its twin; an untested boundary branch marked `VULN: GEN-07`.
-`tests/fixtures/security/vulnerable.py` — one planted defect per `SEC-01`…`SEC-07`: an endpoint
+`tests/fixtures/security/vulnerable.py`, one planted defect per `SEC-01`…`SEC-07`: an endpoint
 with the auth decorator commented out; an object fetched by ID with no owner check;
 `os.system("ping " + host)`; a hardcoded `AWS_SECRET`; `hashlib.md5` for passwords plus
 `random.random()` for a token; `pickle.loads(request.data)` and a `requests.get(user_url)` SSRF;
@@ -935,7 +935,7 @@ Clean counterparts for both, each `CLEAN-FIXTURE`, each passing `python3 -m py_c
 - [ ] **Step 6: Run to verify pass**
 
 Run: `python3 tests/validate.py`
-Expected: `OK` — all check groups pass, all six skills and all six fixture directories present.
+Expected: `OK` (all check groups pass, all six skills and all six fixture directories present).
 
 ---
 
@@ -951,9 +951,9 @@ Expected: `OK` — all check groups pass, all six skills and all six fixture dir
 
 - [ ] **Step 1: Write `tests/README.md`**
 
-Two sections. `## Automated` — what `validate.py` proves (design criterion 4 fully; criterion 1's
-coverage precondition — every checklist ID has a fixture; structural invariants) and the one-line
-command to run it. `## Manual` — a numbered protocol for what a script cannot judge, one entry per
+Two sections. `## Automated`: what `validate.py` proves (design criterion 4 fully; criterion 1's
+coverage precondition: every checklist ID has a fixture; structural invariants) and the one-line
+command to run it. `## Manual`: a numbered protocol for what a script cannot judge, one entry per
 remaining criterion, each with the exact prompt to issue, the fixture to point it at, and the pass
 condition:
 
@@ -963,7 +963,7 @@ condition:
 2. **False positives (criterion 2):** invoke against `clean.*`; pass = zero Critical and zero High
    findings.
 3. **Trigger behaviour (criterion 3):** issue each skill's intended phrasing in a fresh session
-   and confirm the intended skill loads and the others do not — the phrasing list lives here, one
+   and confirm the intended skill loads and the others do not: the phrasing list lives here, one
    row per skill, plus two cross-checks ("review this Go service" must not load
    `security-review`; "audit this for vulns" must not load `code-review` alone).
 4. **Tools absent (criterion 5):** run with the linters uninstalled; pass = the review completes
@@ -982,7 +982,7 @@ are present.
 
 Add `python3 -m py_compile` over `tests/fixtures/general/*.py` and `tests/fixtures/security/*.py`,
 and `node --check` over `tests/fixtures/vue-ts/*.ts` only if `node` is present (skip `.vue`, which
-`node` cannot parse) — again reporting absent tools as skipped, not failed.
+`node` cannot parse), again reporting absent tools as skipped, not failed.
 
 - [ ] **Step 4: Run the full suite**
 
