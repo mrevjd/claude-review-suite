@@ -296,6 +296,28 @@ else
   bad "stale-if-error" "provenance was '${row##*$'\t'}'"
 fi
 
+# Metric preference: cvssMetricV31 must win over cvssMetricV40 when both are present. scored.json
+# only ever carries one metric type, so nothing before this could catch the chain being reordered
+# (e.g. v4.0 checked before v3.1); this fixture carries both, with deliberately different scores.
+row=$(printf 'CVE-2026-22222\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/prefers-v31-over-v40.json" bash "$SCRIPT" 2>/dev/null)
+expected=$(printf 'CVE-2026-22222\t9.8\tCRITICAL\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H\t-\t2026-01-15\tAnalyzed\tlive')
+if [[ "$row" == "$expected" ]]; then
+  ok "cvssMetricV31 is preferred over cvssMetricV40 when both are present"
+else
+  bad "metric preference" "got '$row'"
+fi
+
+# CVSS v2 puts baseSeverity on the metric object, not inside cvssData, so parse_response falls
+# back to $mm.baseSeverity. This is the only fixture exercising that fallback.
+row=$(printf 'CVE-2026-33333\n' | PATH="$BOX/bin:$PATH" \
+  NVD_TEST_BODY="$FIXTURES/only-cvssv2-metric.json" bash "$SCRIPT" 2>/dev/null)
+if [[ "$row" == *$'\t'MEDIUM$'\t'* ]]; then
+  ok "a CVSS v2-only record reads baseSeverity from the metric object, not cvssData"
+else
+  bad "cvssMetricV2 severity fallback" "got '$row'"
+fi
+
 echo
 if [[ $failures -gt 0 ]]; then
   echo "$failures nvd-enrich failure(s), $passes passed"

@@ -1,0 +1,26 @@
+{
+  "resultsPerPage": 1,
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2026-33333",
+        "published": "2026-02-01T09:00:00.000",
+        "vulnStatus": "Analyzed",
+        "metrics": {
+          "cvssMetricV2": [
+            {
+              "type": "Primary",
+              "baseSeverity": "MEDIUM",
+              "cvssData": {
+                "version": "2.0",
+                "vectorString": "AV:N/AC:L/Au:N/C:P/I:P/A:N",
+                "baseScore": 5.0
+              }
+            }
+          ]
+        },
+        "weaknesses": []
+      }
+    }
+  ]
+}
