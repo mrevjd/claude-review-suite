@@ -87,6 +87,47 @@ else
   bad "invalid CVE" "stderr did not name the dropped ID: '$err'"
 fi
 
+# ---------------------------------------------------------------- key resolution
+mkdir -p "$XDG_CONFIG_HOME/claude-review-suite"
+KEYFILE="$XDG_CONFIG_HOME/claude-review-suite/nvd.env"
+SECRET="TESTKEY-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+printf '# comment line\nNVD_API_KEY=%s\n' "$SECRET" >"$KEYFILE"
+chmod 600 "$KEYFILE"
+
+out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+if grep -qE '^key +present \(nvd.env\)' <<<"$out"; then
+  ok "0600 nvd.env is read"
+else
+  bad "key file" "--check did not report the key: '$out'"
+fi
+if grep -q "$SECRET" <<<"$out"; then
+  bad "key leak" "--check printed the key value itself"
+else
+  ok "--check never prints the key value"
+fi
+
+out=$(printf '' | NVD_API_KEY=env-wins-key bash "$SCRIPT" --check 2>&1)
+if grep -qE '^key +present \(env\)' <<<"$out"; then
+  ok "\$NVD_API_KEY takes precedence over the file"
+else
+  bad "env precedence" "'$out'"
+fi
+
+chmod 644 "$KEYFILE"
+out=$(printf '' | bash "$SCRIPT" --check 2>&1)
+if grep -qE '^key +(absent|refused)' <<<"$out" && grep -q 'chmod 600' <<<"$out"; then
+  ok "world-readable nvd.env is refused with a chmod hint"
+else
+  bad "permission refusal" "'$out'"
+fi
+if grep -q "$SECRET" <<<"$out"; then
+  bad "key leak on refusal" "the refused key was printed anyway"
+else
+  ok "a refused key is never printed"
+fi
+chmod 600 "$KEYFILE"
+
 echo
 if [[ $failures -gt 0 ]]; then
   echo "$failures nvd-enrich failure(s), $passes passed"
