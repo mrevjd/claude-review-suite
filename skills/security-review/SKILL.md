@@ -28,6 +28,20 @@ Follow `../../references/procedure.md` for scoping, probing and error handling. 
    across any scanner added later; the script deduplicates its own input. A CVE that comes back
    `unavailable` is still reported as a finding, with the enrichment gap named in
    `## Checks skipped`.
+
+   Each row is eight tab-separated columns, and reading them wrongly is how enrichment becomes
+   decoration:
+
+   | Column | What to do with it |
+   |---|---|
+   | `ID` | the CVE, uppercased and deduped |
+   | `SCORE` | NVD's CVSS base score. Evidence for the finding, never its severity |
+   | `SEVERITY` | NVD's own label (`CRITICAL`…`LOW`), not this suite's vocabulary. Never copy it into the severity field |
+   | `VECTOR` | the CVSS vector, e.g. `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/…`. This is the input to the ladder below, so carry it onto the `NVD:` line |
+   | `CWE` | first `CWE-` value, or `-` when NVD recorded none |
+   | `PUBLISHED` | `YYYY-MM-DD` |
+   | `STATUS` | NVD's analysis state, not an error field. `Analyzed` and `Modified` are normal; `Awaiting Analysis` means the score may move; **`Rejected` means the CVE was withdrawn, so the finding is about the scanner flagging a withdrawn CVE, not about the dependency** |
+   | `PROVENANCE` | `live` or `cache` are current. **`cache-stale` means the lookup failed and a past-TTL copy was served, so the score may be out of date; `unavailable` means no enrichment at all.** Both go in `## Checks skipped` with the reason the script printed on stderr |
 5. **Delegate** to every language skill that applies — `review-go`, `review-bash`, `review-vue-ts`,
    `review-php` — asking each to weight its security-relevant rows (see Delegation).
 6. **Walk the threat checklist below** over every file in scope.
@@ -55,7 +69,9 @@ Several missing at once? The suite ships `review-tools.sh`, which probes and ins
 toolchain in one pass. **Name it in `## Checks skipped` and leave running it to the user** — a review
 reports, it does not install.
 
-All three exit non-zero when they find something — that is a result, not a crash. A `semgrep` run
+The three scanners exit non-zero when they find something: that is a result, not a crash.
+`nvd-enrich.sh` deliberately has no found-problems exit code, so non-zero from it always means the
+enrichment step was skipped. A `semgrep` run
 that cannot fetch its ruleset, a `gitleaks` run outside a git repository, or a `trivy` database
 download failure *is* a crash: it goes in `## Checks skipped` with the reason, because "no secrets
 found" and "the secret scanner could not run" must never read the same way.

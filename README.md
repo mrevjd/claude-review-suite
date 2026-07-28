@@ -83,12 +83,17 @@ be determined reports `unknown` rather than being silently reported as fine.
 
 ### NVD enrichment
 
-`security-review` annotates every CVE its scanners find with that CVE's CVSS vector, CWE,
-publication date and NVD analysis status, using `nvd-enrich.sh`. The score is evidence in the
-finding, not the finding's severity: reachability decides severity, per `references/rubric.md`.
+`security-review` annotates every CVE its scanners find with that CVE's CVSS base score, NVD
+severity label, CVSS vector, CWE, publication date and NVD analysis status, using `nvd-enrich.sh`.
+The score is evidence in the finding, not the finding's severity: reachability decides severity, per
+`references/rubric.md`.
 
 It works with no configuration. An API key only raises the rate limit, from 5 requests per 30
-seconds to 50, which the script turns into a per-run lookup cap of 8 keyless and 50 keyed.
+seconds to 50, which the script turns into a per-run budget of 8 NVD requests keyless and 50 keyed.
+A retry counts against that budget like any other request. `NVD_MAX_LOOKUPS` overrides it: set it
+higher for a repository with more CVEs than the cap, or `NVD_MAX_LOOKUPS=0` to answer entirely from
+the cache and make no requests at all. A non-numeric value is refused with a warning and the default
+is kept, because a cap that silently disappears is worse than one that is too low.
 
 Get a free key at https://nvd.nist.gov/developers/request-an-api-key, then:
 
@@ -103,11 +108,18 @@ printed, because a credential the whole machine can read is a finding this suite
 your code. `NVD_API_KEY` in the environment takes precedence over the file, which is the easier
 route in CI.
 
-Responses cache under `~/.cache/claude-review-suite/nvd`, for 7 days normally and 24 hours while a
-record is still awaiting NVD analysis. Clear it with `rm -rf ~/.cache/claude-review-suite/nvd`.
+**If you set `XDG_CONFIG_HOME`, that path is not `~/.config`.** The key file is read from
+`${XDG_CONFIG_HOME:-$HOME/.config}/claude-review-suite/nvd.env`, so substitute your own value into
+the commands above or the script will never see the file you just created. The cache honours
+`XDG_CACHE_HOME` the same way.
 
-Check the setup with `./nvd-enrich.sh --check`, which reports `curl`, `jq`, key source, cache size
-and network reachability, and never prints the key itself.
+Responses cache under `${XDG_CACHE_HOME:-$HOME/.cache}/claude-review-suite/nvd`, keyed off NVD's
+analysis status: 7 days for a record NVD has analysed, 24 hours while one is still awaiting or
+undergoing analysis, and 30 days for a rejected CVE, which will not change again. Clear it with
+`rm -rf ~/.cache/claude-review-suite/nvd`.
+
+Check the setup with `./nvd-enrich.sh --check`, which reports `curl`, `jq`, key source, the cache
+path with a count of cached entries, and network reachability, and never prints the key itself.
 
 ## Dual output
 
@@ -143,6 +155,7 @@ references/         rubric.md (severity, confidence, finding format)
 skills/             one directory per skill, each a single SKILL.md
 tests/              validate.py, run.sh, fixtures/, README.md
 review-tools.sh     probe / install / tsv for the tools the skills use
+nvd-enrich.sh       CVE IDs on stdin, one enriched TSV row out; see NVD enrichment above
 ```
 
 All six skills reference the same three documents, which is what lets a Go finding and a Vue finding

@@ -32,6 +32,17 @@ def read(rel):
     return path.read_text(encoding="utf-8")
 
 
+def section(text, heading):
+    """The body of one '## <heading>' section, bounded by the next '## ' heading or end of file.
+
+    text.split("## Heading")[1] is not this: it runs to the end of the document, so an assertion
+    written against it passes on content that has been moved into any *later* section. Two checks in
+    this file admitted trivial passes that way, which is a worse defect than the gap they were added
+    to close, because a green run is then evidence of nothing."""
+    match = re.search(rf"^##\s+{re.escape(heading)}\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    return match.group(1) if match else None
+
+
 def load_json(rel):
     text = read(rel)
     if text is None:
@@ -541,21 +552,38 @@ def check_nvd_enrichment():
     if not re.search(r"\|\s*`nvd-enrich\.sh`\s*\|", text.split("## Threat checklist")[0]):
         fail(f"{rel}: nvd-enrich.sh is not listed in the capability table")
 
-    calibration = text.split("## Severity calibration")
-    if len(calibration) < 2:
-        fail(f"{rel}: missing '## Severity calibration' section")
-    elif not re.search(r"evidence,\s*never\s*severity", calibration[1], re.I):
-        fail(f"{rel}: severity calibration must state that CVSS is evidence, never severity")
+    # The step that actually makes enrichment happen. Without this, deleting Procedure step 4 in its
+    # entirety -- the grep, the pipe, all of it -- left every other assertion here satisfied and the
+    # whole run green, because the probe line and the capability table both still named the script.
+    # A feature nothing invokes is decoration, and this is the check that says so.
+    procedure = section(text, "Procedure")
+    if procedure is None:
+        fail(f"{rel}: missing '## Procedure' section")
+    elif "nvd-enrich.sh" not in procedure:
+        fail(f"{rel}: '## Procedure' never invokes nvd-enrich.sh, so nothing in the skill makes "
+             f"enrichment happen")
 
-    # Scoped to the Output section, where this guidance belongs, rather than split on every heading
-    # in the document: an unscoped split lets "nvd" from the probe line or the Procedure step pair
-    # with the pre-existing, unrelated "## Checks skipped" mention in Capability probe (about
-    # review-tools.sh) and pass without this guidance existing at all.
-    output = text.split("## Output")
-    if len(output) < 2:
+    # Bounded, because splitting on the heading alone let the rule be moved into any later section --
+    # '## Common mistakes', say -- and still pass. Where the rule sits is the point: it has to be in
+    # the section the agent reads while it is assigning severity.
+    calibration = section(text, "Severity calibration")
+    if calibration is None:
+        fail(f"{rel}: missing '## Severity calibration' section")
+    elif not re.search(r"evidence,\s*never\s*severity", calibration, re.I):
+        fail(f"{rel}: '## Severity calibration' must state that CVSS is evidence, never severity")
+
+    # Scoped to a *paragraph* inside '## Output', and matching the script's name rather than the token
+    # "nvd". Bounding the section alone was not enough: '## Output' already contains the word
+    # "skipped" in unrelated pre-existing text about the skipped-checks table, so the two halves of
+    # the test were satisfied by different sentences and the whole guidance paragraph could be
+    # replaced by "NVD is a database." without failing. One paragraph has to carry both.
+    output = section(text, "Output")
+    if output is None:
         fail(f"{rel}: missing '## Output' section")
-    elif not (re.search(r"\bnvd\b", output[1], re.I) and "skipped" in output[1].lower()):
-        fail(f"{rel}: 'Checks skipped' guidance does not name NVD enrichment")
+    elif not any("nvd-enrich.sh" in para and re.search(r"checks skipped", para, re.I)
+                 for para in re.split(r"\n\s*\n", output)):
+        fail(f"{rel}: '## Output' has no paragraph telling the reader to name nvd-enrich.sh's "
+             f"failure in '## Checks skipped' with a reason")
 
     proc = read("references/procedure.md")
     if proc and "NVD:" not in proc:

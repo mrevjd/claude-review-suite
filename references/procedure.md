@@ -87,7 +87,6 @@ list per `rubric.md`.
 
 [F1] Critical · Confirmed · internal/auth/session.go:112-118 · GO-01
   What:   ...
-  NVD:    CVE-2021-44228 · CVSS 10.0 Critical · CWE-917 · published 2021-12-10
   Why:    ...
   Fix:    ...
 
@@ -95,7 +94,14 @@ list per `rubric.md`.
 ...
 
 ## Medium
-...
+
+[F3] Medium · Confirmed · package-lock.json:1204 · SEC-06
+  What:  lodash 4.17.15 is vulnerable to prototype pollution via _.zipObjectDeep.
+  NVD:   CVE-2020-8203 · CVSS 7.4 High · CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
+         · CWE-1321 · published 2020-07-15
+  Why:   Scored below NVD because no call path reaches _.zipObjectDeep with
+         attacker-controlled keys; the only caller passes a literal shape.
+  Fix:   Upgrade to lodash >= 4.17.19.
 
 ## Low
 ...
@@ -114,6 +120,15 @@ list per `rubric.md`.
 The `NVD:` line is optional and appears only on findings that carry a CVE. Today only
 `security-review` emits it, from `nvd-enrich.sh`. It records what NVD says; the severity on the
 first line remains this suite's own judgement, per `rubric.md`.
+
+It carries the CVSS **vector**, not just the score. The vector is what the reader needs to check the
+severity, and it is what the severity ladder consumes; the bare number is the thing that invites
+anchoring. Printing the anchor and withholding the reasoning input is backwards.
+
+`[F3]` above is the shape to copy when this suite's severity and NVD's diverge: NVD says High, the
+finding says Medium, and the `Why:` line spends one clause saying why. Writing that clause is a
+forcing function, because scoring below NVD then requires stating the reason out loud rather than
+quietly deflating a number.
 
 Findings are grouped by severity, worst first. A severity with no findings is omitted; do not print
 empty headings.
