@@ -7,6 +7,18 @@ tag. Entries before 0.2.0 are drawn from those tag messages.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-30
+
+### Added
+
+- This changelog, covering every release from 0.1.0. Reconstructed from the annotated tags and the
+  commits in each range rather than from memory, and cross-checked against the code: the request
+  budgets, cache TTLs, paths and provenance values all verify, and the 0.1.1 entry was rewritten
+  after reading the diff showed the `SEC-06` change was to the clean fixture rather than the
+  vulnerable one.
+
+No functional change from 0.2.1.
+
 ## [0.2.1] - 2026-07-30
 
 ### Changed
@@ -105,6 +117,7 @@ Findings from the first manual test run:
   entry points, the `review-go`, `review-bash`, `review-vue-ts` and `review-php` language skills, the
   shared rubric, procedure and agent-prompt references, and `review-tools.sh`.
 
+[0.2.2]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/mrevjd/claude-review-suite/compare/v0.1.3...v0.1.4

@@ -9,7 +9,7 @@
     {
       "name": "claude-review-suite",
       "description": "Code and security review skills for Go, Bash, Vue/TypeScript and PHP that emit a human report plus a re-verifiable agent prompt block, with scanner-found CVEs annotated from the NIST NVD",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "source": "./",
       "author": {
         "name": "Evan Davies",
