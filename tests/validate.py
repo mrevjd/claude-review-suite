@@ -80,6 +80,55 @@ def check_manifests():
                 fail("marketplace.json: source must be './'")
 
 
+CHANGELOG_HEADING_RE = re.compile(r"^## \[(?P<version>[^\]]+)\](?P<rest>.*)$", re.M)
+CHANGELOG_LINK_RE = re.compile(r"^\[(\d+\.\d+\.\d+)\]:\s+\S+", re.M)
+
+
+def check_changelog():
+    """The changelog's newest entry must name the version the manifests ship.
+
+    A release is three edits now rather than two: both manifests, and an entry here. Nothing stopped
+    the third from being forgotten, and a changelog whose newest entry lags the shipped version is
+    worse than no changelog at all, because it reads as a complete record while omitting the release
+    someone is installing.
+
+    Also checked, since both failures are silent: every entry needs a link definition, or its
+    heading renders as a dead reference; and every link definition needs an entry, or it is a
+    leftover from a version that got renumbered."""
+    plugin = load_json(".claude-plugin/plugin.json")
+    text = read("CHANGELOG.md")
+    if plugin is None or text is None:
+        return
+
+    headings = []
+    for match in CHANGELOG_HEADING_RE.finditer(text):
+        version, rest = match.group("version"), match.group("rest")
+        if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            fail(f"CHANGELOG.md: entry heading {version!r} is not semver x.y.z")
+            continue
+        if not re.fullmatch(r" - \d{4}-\d{2}-\d{2}", rest):
+            fail(f"CHANGELOG.md: entry {version} is not dated ' - YYYY-MM-DD'")
+        headings.append(version)
+
+    if not headings:
+        fail("CHANGELOG.md: no '## [x.y.z]' entries found")
+        return
+
+    shipped = str(plugin.get("version", ""))
+    if headings[0] != shipped:
+        fail(f"CHANGELOG.md: newest entry is {headings[0]}, but the manifests ship {shipped}")
+
+    links = set(CHANGELOG_LINK_RE.findall(text))
+    for version in sorted(set(headings) - links):
+        fail(f"CHANGELOG.md: entry {version} has no link definition")
+    for version in sorted(links - set(headings)):
+        fail(f"CHANGELOG.md: link definition {version} has no entry")
+
+    ordered = sorted(headings, key=lambda v: tuple(int(p) for p in v.split(".")), reverse=True)
+    if headings != ordered:
+        fail("CHANGELOG.md: entries are not in descending version order, newest first")
+
+
 def check_references():
     rubric = read("references/rubric.md")
     if rubric:
@@ -590,10 +639,11 @@ def check_nvd_enrichment():
         fail("procedure.md: finding format does not carry the optional 'NVD:' line")
 
 
-CHECKS = [check_manifests, check_references, check_agent_prompt_parses,
-          check_skill_frontmatter, check_tool_probes, check_checklist_coverage,
-          check_vuln_anchors, check_delegation, check_trigger_distinctness,
-          check_installer_is_suggested_not_run, check_nvd_enrichment]
+CHECKS = [check_manifests, check_changelog, check_references,
+          check_agent_prompt_parses, check_skill_frontmatter, check_tool_probes,
+          check_checklist_coverage, check_vuln_anchors, check_delegation,
+          check_trigger_distinctness, check_installer_is_suggested_not_run,
+          check_nvd_enrichment]
 
 
 def main():

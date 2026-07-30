@@ -323,7 +323,8 @@ that would make this feature harmful is the one property no structural check can
 property of judgement exercised at review time and not of text in a file.
 
 So: a green validator run is evidence that the instruction survives, not evidence that it is
-followed. Eleven passing check groups must never be read as "the reports are sound". Whether severity
+followed. A full set of passing check groups must never be read as "the reports are sound", however
+many of them there are and however many get added later. Whether severity
 tracks reachability rather than CVSS is a live-agent question, and it belongs with the other criteria
 that `tests/README.md` documents as a manual protocol and deliberately does not claim as automated.
 
