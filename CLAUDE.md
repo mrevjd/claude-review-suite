@@ -49,29 +49,31 @@ nicely.
 ## Contracts the validator enforces
 
 Changing a skill or fixture means satisfying `tests/validate.py`. It has **12 check groups**, not
-the four spelled out below. Read the group that failed before guessing at the rule.
+the five spelled out below. Read the group that failed before guessing at the rule.
 
 - **Skill frontmatter** (`check_skill_frontmatter`): exactly `name` + `description`, under 1024
   chars, `name` matching the directory, description starting with "Use when" and in third person
   outside quoted trigger phrases, links to all three `references/` docs, a "Checks skipped"
   requirement, no dangling reference paths.
 - **Fixtures** (`check_checklist_coverage`, `check_vuln_anchors`): every checklist row a skill
-  declares is planted in one of that skill's vulnerable fixtures, and every vulnerable fixture has a
-  clean counterpart. Every `VULN: <ID>` carries either an `ANCHOR:` naming a construct that must
-  still be present, or an `ANCHOR-ABSENT:` naming a guard whose absence is the defect. **The comment
-  is not the defect**. Fixing a plant without removing its annotation fails here.
+  declares is planted in one of that skill's `vulnerable*` fixtures, and every ID planted is
+  declared by the owning skill. Each fixture directory needs at least one `clean*` file, marked
+  `CLEAN-FIXTURE` and planting no IDs, or the false-positive side goes untested. Every `VULN: <ID>`
+  carries either an `ANCHOR:` naming a construct that must still be present, or an `ANCHOR-ABSENT:`
+  naming a guard whose absence is the defect. **The comment is not the defect**. Fixing a plant
+  without removing its annotation fails here.
 - **Delegation** (`check_delegation`): the two entry points delegate to all four language skills,
   say how findings merge, and use no `@skills/` or `@references/` link, because an `@` path
   force-loads that file into context.
 - **Manifests** (`check_manifests`): `.claude-plugin/plugin.json` and `marketplace.json` must agree
   on name and version.
 
-The other eight are worth knowing before you edit a skill, since each one fails on something easy
+The other seven are worth knowing before you edit a skill, since each one fails on something easy
 to do by accident: `check_changelog`, `check_references`, `check_agent_prompt_parses`,
-`check_tool_probes` (a skill must list exactly its assigned tools, each with a `command -v` probe),
-`check_trigger_distinctness` (entry points match intent, language skills match language + intent,
-and descriptions must not contend), `check_installer_is_suggested_not_run`, `check_nvd_enrichment`,
-and `check_vuln_anchors`.
+`check_tool_probes` (every tool assigned to a skill must be named in its `SKILL.md`, and the first
+one needs a literal `command -v <binary>` line), `check_trigger_distinctness` (entry points match
+intent, language skills match language + intent, and descriptions must not contend),
+`check_installer_is_suggested_not_run`, and `check_nvd_enrichment`.
 
 ## Checklist IDs
 
