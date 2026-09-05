@@ -5,7 +5,8 @@
 #   ./review-tools.sh install [dir]   install anything missing, globally
 #   ./review-tools.sh tsv     [dir]   machine-readable probe, for the skills
 #   ./review-tools.sh snyk    [dir]   run the snyk scans alone, without a review pass
-#                                     exit 0 clean, 1 findings, 2 neither scan could run
+#                                     exit 0 both scans clean, 1 findings, 2 neither scan ran,
+#                                            3 incomplete: what ran was clean, a scan was skipped
 #
 # Resolution: global first, project-local fallback.
 #   REVIEW_TOOL_PREFER=local  reverses it
@@ -393,7 +394,15 @@ cmd_snyk() {
         return 2
     fi
     [ "$found" -eq 1 ] && return 1
-    say "$ran of 2 scans ran, nothing found. Anything skipped above is a gap, not a pass."
+    if [ "$ran" -lt 2 ]; then
+        # Exit 0 here would be indistinguishable from a complete clean scan, and on an account
+        # without Snyk Code enabled this is the usual outcome rather than an edge case. The SKIP
+        # line above says so in words; a caller gating on the exit code cannot read words, which is
+        # the whole reason this suite refuses to let a check that did not run look like a pass.
+        warn "$ran of 2 scans ran and found nothing. Incomplete, not clean: see the SKIP above."
+        return 3
+    fi
+    say "both scans ran, nothing found."
     return 0
 }
 

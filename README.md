@@ -75,7 +75,8 @@ every skill degrades to its checklist when a tool is absent.
 ./review-tools.sh probe      # capability report: status, scope, version   (default)
 ./review-tools.sh install    # install everything missing
 ./review-tools.sh tsv        # same probe, tab-separated, for a skill to consume
-./review-tools.sh snyk       # run the snyk scans alone: 0 clean, 1 findings, 2 neither ran
+./review-tools.sh snyk       # the snyk scans alone: 0 clean, 1 findings, 2 neither ran,
+                             #                        3 incomplete, a scan was skipped
 ```
 
 `probe` prints a table and exits with a count of what is missing:
@@ -98,9 +99,11 @@ username, rather than `snyk config get api`, which answers by printing the token
 
 `snyk` runs `snyk test` (dependency graph only) and `snyk code test` (**uploads source to Snyk**).
 Each scan reports RAN or SKIP with a reason, and the exit code separates "found nothing" from "could
-not scan": a run where neither scan executed exits 2, never 0. Snyk Code is separately licensed, so
-an account that authenticates can still be refused the SAST scan with `SNYK-CODE-0005`; that is a
-SKIP with its own reason, not a crash and not a clean pass.
+not scan". **Exit 0 means both scans ran and found nothing.** A run where only one scan executed
+exits 3 even when that scan was clean, and a run where neither executed exits 2; neither is a pass.
+Snyk Code is separately licensed, so an account that authenticates can still be refused the SAST
+scan with `SNYK-CODE-0005`, which is a SKIP with its own reason rather than a crash or a clean pass,
+and it makes the partial run the ordinary case rather than an unlikely one.
 
 **Resolution order** is global first, then project-local (`node_modules/.bin`, `vendor/bin`), so a
 globally installed `eslint` wins over a vendored one. Set `REVIEW_TOOL_PREFER=local` to reverse that,

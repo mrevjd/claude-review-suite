@@ -26,7 +26,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   them; the exit code does not.
 - `./review-tools.sh snyk [dir]` runs the two scans on their own, for when the scan is wanted
   without a full review pass. Each scan reports RAN or SKIP with a reason, and the exit code keeps
-  "found nothing" apart from "could not scan": 0 clean, 1 findings, 2 neither scan ran.
+  "found nothing" apart from "could not scan": 0 both scans clean, 1 findings, 2 neither scan ran,
+  3 incomplete, meaning what did run was clean but a scan was skipped. Exit 3 exists because the
+  partial run is the ordinary outcome wherever Snyk Code is not enabled, and reporting it as 0 would
+  hand a caller a clean result for a review half of which never happened.
+- `tests/snyk-runner-test.sh`, run by `tests/run.sh`, pinning all four of those exit codes against a
+  fake snyk shimmed onto `PATH`, so the contract is checked rather than remembered.
 - `check_snyk_probe`, the thirteenth check group, enforcing all of the above: the probe asks the
   PATH question and the auth question, the unauthenticated case is written down as a skipped check,
   `snyk auth` carries the same suggest-don't-run qualifier the installer does, and snyk is wired

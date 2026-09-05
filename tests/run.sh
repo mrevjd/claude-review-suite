@@ -159,6 +159,12 @@ gate "differential: Go fixtures still diverge" go 1 \
 gate "nvd-enrich.sh behaves" bash 1 \
   bash tests/nvd-test.sh
 
+# Shims a fake snyk onto PATH, so this runs everywhere and never reaches Snyk. It pins the exit-code
+# contract of `review-tools.sh snyk`, where a partial run once exited 0: the output said a scan had
+# been skipped and the exit code said clean, and the exit code is the half a caller reads.
+gate "review-tools.sh snyk exit-code contract" bash 1 \
+  bash tests/snyk-runner-test.sh
+
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
 # shellcheck disable=SC2016
 gate "node --check on TS fixtures" node "${#ts_fixtures[@]}" \
