@@ -1,0 +1,36 @@
+# gitleaks configuration for claude-review-suite.
+#
+# This replaces a .gitleaksignore that had stopped working. That file listed two fixture paths, but
+# .gitleaksignore matches *fingerprints* (commit:path:rule:line), never paths, so gitleaks rejected
+# both entries as invalid on every run and suppressed nothing. Emptying the file produced byte
+# identical results, which is how the dead config was found.
+#
+# Path and content allowlists are the right mechanism here: they are declarative, they survive the
+# file being edited, and unlike a fingerprint they do not silently stop applying when a line moves.
+
+[extend]
+useDefault = true
+
+# This repository ships deliberately-vulnerable review fixtures, and several must contain
+# credential-shaped literals or the SEC-04 and VT-04 checklist rows have nothing to catch. The
+# literals are inert: low entropy, EXAMPLE-prefixed bodies, and AWS's own published documentation
+# value.
+# Tradeoff, stated rather than discovered later: this blesses the whole fixtures tree, so a genuine
+# credential committed under tests/fixtures/ would not be reported. That is accepted because every
+# file there is fabricated input by construction, and the alternative (naming each fixture) is what
+# the previous config tried and got wrong.
+[[allowlists]]
+description = "Deliberately-vulnerable review fixtures"
+paths = ['''^tests/fixtures/''']
+
+# One placeholder appears outside tests/fixtures/, in the NVD test script and the design doc that
+# introduced it. It is matched by content rather than by path, so the exemption travels with the
+# literal instead of blessing whole files: anything else in those files is still scanned.
+#
+# The old .gitleaksignore said to treat any hit outside tests/fixtures/ as real and rotate it. That
+# rule was right and is kept: this is the one audited exception to it, allowed because the value is
+# a fixed sequential placeholder rather than a redacted real key. Do not widen this pattern to make
+# a new finding go away.
+[[allowlists]]
+description = "TESTKEY- literals are fixed test placeholders, not credentials"
+regexes = ['''TESTKEY-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}''']
