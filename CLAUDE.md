@@ -51,15 +51,18 @@ nicely.
 Changing a skill or fixture means satisfying `tests/validate.py`. It has **12 check groups**, not
 the five spelled out below. Read the group that failed before guessing at the rule.
 
-- **Skill frontmatter** (`check_skill_frontmatter`): `name` + `description` required, `model` and
-  `effort` optional and value-checked, nothing else permitted; under 1024 chars, `name` matching the
-  directory, description starting with "Use when" and in third person outside quoted trigger
-  phrases, links to all three `references/` docs, a "Checks skipped" requirement, no dangling
-  reference paths. All six skills pin `model: opus` / `effort: xhigh`, so the depth of a review does
-  not depend on what the invoking session happened to be running. A pin Claude Code will not apply
-  in auto mode (`haiku` today) warns rather than fails: it is legal, but it is discarded at runtime
-  with only a log line, and a review that looks pinned and is not is the failure this suite exists
-  to catch.
+- **Skill frontmatter** (`check_skill_frontmatter`): exactly `name`, `description`, `model` and
+  `effort`, all four required and value-checked, nothing else permitted; under 1024 chars, `name`
+  matching the directory, description starting with "Use when" and in third person outside quoted
+  trigger phrases, links to all three `references/` docs, a "Checks skipped" requirement, no
+  dangling reference paths. **The six skills must also agree on their pins**, which is what keeps
+  `model: opus` / `effort: xhigh` true of all of them without anyone maintaining it by hand: the
+  entry points merge the language passes into one severity-ordered list, and a list built from
+  passes run at different depths is ordered by severity and luck. A pin Claude Code will not apply
+  in auto mode (`haiku` today, verified against CLI 2.1.261) warns rather than fails: it is legal
+  and works outside auto mode, but it is discarded at runtime with only a log line, and a review
+  that looks pinned and is not is the failure this suite exists to catch.
+  `tests/frontmatter-test.py` asserts each of those branches still rejects what it claims to.
 - **Fixtures** (`check_checklist_coverage`, `check_vuln_anchors`): every checklist row a skill
   declares is planted in one of that skill's `vulnerable*` fixtures, and every ID planted is
   declared by the owning skill. Each fixture directory needs at least one `clean*` file, marked
