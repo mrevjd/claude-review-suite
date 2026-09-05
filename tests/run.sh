@@ -181,6 +181,33 @@ shopt -u nullglob
 gate "shellcheck on this repo's own scripts" shellcheck "${#repo_scripts[@]}" \
   shellcheck -S style "${repo_scripts[@]}"
 
+# .gitleaks.toml allowlists the fixtures tree and the TESTKEY- placeholder. An allowlist is one
+# widened pattern away from a scanner that reports nothing and looks clean doing it, which is the
+# same silent-gap failure the rest of this file exists to prevent. So both halves are asserted: the
+# repo is quiet, and a planted credential outside the fixtures tree is still caught.
+if have gitleaks; then
+  gate "gitleaks is silent on this repo" gitleaks 1 \
+    gitleaks detect --no-banner --redact --no-git
+
+  # The probe token is split across two assignments and joined at run time. Writing the whole token
+  # as one literal makes gitleaks flag THIS file, so the silent check above fails on its own test
+  # data; that happened, and this is the fix rather than a precaution. Neither half matches on its
+  # own: the head is too short for the 36-character body the rule wants, and the tail carries no
+  # prefix. A sequential alphabet was tried first and is useless here, because gitleaks stopwords
+  # discard it and the probe then proves nothing.
+  probe_head='ghp_A1b2C3d4E5f6G7h8I9j0'
+  probe_tail='K1l2M3n4O5p6Q7r8'
+  probe=$(mktemp "${ROOT}/gitleaks-probe-XXXXXX.sh")
+  trap 'rm -f "$probe"' EXIT
+  printf 'GITHUB_TOKEN="%s%s"\n' "$probe_head" "$probe_tail" >"$probe"
+  expect_flagged "gitleaks still catches a planted credential" gitleaks 1 \
+    gitleaks detect --no-banner --redact --no-git
+  rm -f "$probe"
+  trap - EXIT
+else
+  skip "gitleaks allowlist is not over-broad" "gitleaks not installed"
+fi
+
 if [[ ${#skipped[@]} -gt 0 ]]; then
   echo
   echo "=== checks skipped ==="
