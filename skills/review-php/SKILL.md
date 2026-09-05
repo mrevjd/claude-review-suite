@@ -1,6 +1,8 @@
 ---
 name: review-php
 description: Use when reviewing or auditing PHP code - .php files, a composer.json project, "review this PHP app", "audit this endpoint", "check this before I deploy" - covering superglobal data flow into sinks, unserialize on untrusted input, local and remote file inclusion, weak session configuration, SQL built by concatenation, and missing output escaping.
+model: opus
+effort: xhigh
 ---
 
 # Review PHP

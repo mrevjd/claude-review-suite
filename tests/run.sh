@@ -67,6 +67,13 @@ expect_flagged() {
 echo "=== structural validator ==="
 python3 tests/validate.py || failed=1
 
+# The validator asserts things about the skills; this asserts the validator's own frontmatter
+# branches still reject what they claim to. It runs against copies in a temp dir, so it cannot
+# disturb the tree the checks above just read.
+echo
+echo "=== validator frontmatter branches ==="
+python3 tests/frontmatter-test.py || failed=1
+
 shopt -s nullglob
 go_fixtures=(tests/fixtures/go/*.go)
 sh_all=(tests/fixtures/bash/*.sh)

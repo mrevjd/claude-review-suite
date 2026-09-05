@@ -36,6 +36,26 @@ applies, merging all findings into one severity-ordered list. Each language skil
 standalone. Languages outside the four (Python, Perl, Ruby, SQL, config) fall through to the
 general or threat checklist, and the report says so rather than passing over them in silence.
 
+## Model and effort
+
+**All six skills pin `model: opus` and `effort: xhigh` in their frontmatter, so installing this
+plugin changes which model your session uses while a review runs, and what that review costs.**
+It is called out here because that is not the sort of thing a plugin should do quietly.
+
+The reason is that a review's depth was otherwise a property of whichever model the invoking session
+happened to be on: running the suite from a cheap session got a shallower review and nothing in the
+report said so. The pins are uniform across all six because the entry points merge the language
+passes into one severity-ordered list, and a list assembled from passes run at different depths is
+ordered by severity and luck.
+
+To change or remove them, edit the `model:` and `effort:` lines in `skills/*/SKILL.md`. The
+validator requires both keys on every skill and requires the six to agree, so change all of them
+together. `model: inherit` restores the previous behaviour of following the session.
+
+One trap worth knowing if you re-pin: Claude Code discards a skill-level `haiku` pin while auto mode
+is on, keeps the session model, and logs only a warning, so the skill looks pinned and is not. The
+validator warns about that rather than failing, since the pin does work outside auto mode.
+
 ## Hybrid tooling
 
 Guidance is the baseline; tools sharpen it. Every skill probes with `command -v` before it runs

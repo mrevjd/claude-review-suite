@@ -1,6 +1,8 @@
 ---
 name: review-vue-ts
 description: Use when reviewing or auditing Vue or TypeScript front-end code - .vue, .ts or .tsx files, "review this component", "audit this front end", "look over this store before I merge" - covering v-html and innerHTML XSS sinks, missing CSRF handling on fetch, secrets shipped in the client bundle, unvalidated props crossing trust boundaries, prototype pollution, and any masking type errors.
+model: opus
+effort: xhigh
 ---
 
 # Review Vue / TypeScript

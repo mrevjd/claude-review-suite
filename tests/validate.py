@@ -12,6 +12,29 @@ SEVERITIES = ["Critical", "High", "Medium", "Low"]
 CONFIDENCES = ["Confirmed", "Likely", "Speculative"]
 STATUSES = ["FIXED", "SKIPPED-STALE", "SKIPPED-DISAGREE"]
 
+# Skill frontmatter. All four keys are required and nothing else is allowed. `model` and `effort`
+# are pins that keep a review's rigour a property of the skill rather than of whatever model the
+# session happened to be on; requiring them is what makes CLAUDE.md's claim that all six agree true
+# by construction instead of by anyone remembering. Claude Code ignores frontmatter keys it does not
+# know, so an unchecked typo fails nowhere and the pin silently does not apply.
+SKILL_FM_REQUIRED = {"name", "description", "model", "effort"}
+SKILL_MODELS = ["opus", "sonnet", "haiku", "fable", "inherit"]
+# "max" is accepted unconditionally here; Claude Code filters it per model, so a skill pinning max
+# on a model that does not offer it falls back rather than failing.
+SKILL_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# Claude Code also accepts a bare integer effort. It validates the value through a predicate this
+# file's author could not resolve from the shipped binary, so the upper bound is unverified and none
+# is imposed: only the obviously wrong shapes (0, leading zeros, negatives, decimals) are rejected.
+# An out-of-range integer is not silent anyway -- the harness reports "has invalid effort".
+EFFORT_INT_RE = re.compile(r"[1-9][0-9]*")
+# Models the harness refuses to apply to a skill while auto mode is on, keeping the session model
+# and logging a warning nobody reads. Pinning one is not an error -- it works outside auto mode --
+# but it is worth saying out loud, because the failure is silent exactly where this suite is used.
+# Verified by reading the auto-mode gate in Claude Code 2.1.261, which blocks the exact model id
+# claude-haiku-4-5. `haiku` is an alias resolved at runtime, so re-check this against the CLI in use
+# rather than trusting the list: when the alias moves, this warns on a pin that now works.
+SKILL_MODELS_IGNORED_IN_AUTO_MODE = ["haiku"]
+
 failures = []
 warnings = []
 
@@ -270,6 +293,7 @@ def frontmatter(text):
 
 
 def check_skill_frontmatter():
+    pins = {}
     for name in SKILLS:
         rel = f"skills/{name}/SKILL.md"
         text = read(rel)
@@ -280,8 +304,25 @@ def check_skill_frontmatter():
             fail(f"{rel}: no YAML frontmatter")
             continue
         keys = {k for k in fm if k != "__raw__"}
-        if keys != {"name", "description"}:
-            fail(f"{rel}: frontmatter keys must be exactly name+description, got {sorted(keys)}")
+        missing = SKILL_FM_REQUIRED - keys
+        unknown = keys - SKILL_FM_REQUIRED
+        if missing:
+            fail(f"{rel}: frontmatter is missing required key(s) {sorted(missing)}")
+        if unknown:
+            fail(f"{rel}: frontmatter has unknown key(s) {sorted(unknown)}, allowed are "
+                 f"{sorted(SKILL_FM_REQUIRED)}")
+        model = fm.get("model")
+        if model is not None:
+            if model not in SKILL_MODELS:
+                fail(f"{rel}: model {model!r} is not one of {SKILL_MODELS}")
+            elif model in SKILL_MODELS_IGNORED_IN_AUTO_MODE:
+                warn(f"{rel}: model {model!r} is ignored while auto mode is on -- the session "
+                     f"model is kept instead, and only a warning is logged")
+        effort = fm.get("effort")
+        if effort is not None and effort not in SKILL_EFFORTS and not EFFORT_INT_RE.fullmatch(effort):
+            fail(f"{rel}: effort {effort!r} is not one of {SKILL_EFFORTS} or a positive integer")
+        if not missing:
+            pins[name] = (model, effort)
         if len(fm["__raw__"]) > 1024:
             fail(f"{rel}: frontmatter is {len(fm['__raw__'])} chars, limit 1024")
         if fm.get("name") != name:
@@ -310,6 +351,14 @@ def check_skill_frontmatter():
         for ref in re.findall(r"\.\./\.\./([A-Za-z0-9_./-]+\.md)", body):
             if not (ROOT / ref).exists():
                 fail(f"{rel}: dangling reference ../../{ref}")
+
+    # The entry points merge findings from the language passes into one severity-ordered list. A list
+    # assembled from passes that ran at different depths is ordered by severity and luck, not by
+    # severity, so the pins have to agree rather than merely exist. This is also what keeps
+    # CLAUDE.md's claim that all six pin the same values true without anyone maintaining it by hand.
+    if len(set(pins.values())) > 1:
+        detail = ", ".join(f"{n}={m}/{e}" for n, (m, e) in sorted(pins.items()))
+        fail(f"skills disagree on model/effort pins, all six must match: {detail}")
 
 
 def check_tool_probes():

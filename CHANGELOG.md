@@ -7,6 +7,38 @@ tag. Entries before 0.2.0 are drawn from those tag messages.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-05
+
+### Added
+
+- `model` and `effort` frontmatter on every skill: all six pin `model: opus` with `effort: xhigh`.
+  A review's rigour was previously a property of whichever model the session happened to be on, so
+  invoking the suite from a cheap session silently got a cheaper review with nothing in the report
+  saying so. The pins make it a property of the skill instead. **This changes which model your
+  session uses during a review, and what it costs**, which the README now says out loud.
+- `check_skill_frontmatter` requires the six skills to agree on their pins. The entry points merge
+  the language passes into one severity-ordered list, and a list assembled from passes run at
+  different depths is ordered by severity and luck.
+- `check_skill_frontmatter` warns when a skill pins a model Claude Code refuses to apply while auto
+  mode is on. Such a pin is discarded, the session model is kept, and the only trace is a
+  warning-level log line, so the failure mode is a review that looks pinned and is not. `haiku`
+  (`claude-haiku-4-5`) is the current member of that set, verified against CLI 2.1.261; the alias
+  is resolved at runtime, so re-check it rather than trusting the list.
+- `tests/frontmatter-test.py`, run by `tests/run.sh`, asserting each of those branches still
+  rejects what it claims to. The branches had been verified once by hand, and that verification was
+  worthless: the fixture was restored with `git checkout --`, which reverts to the index, so three
+  cases ran against a file whose `model:` line had already been wiped and passed having tested
+  nothing.
+
+### Changed
+
+- Skill frontmatter is now exactly `name`, `description`, `model` and `effort`, all four required
+  and value-checked, rather than exactly `name` + `description`. Anything else still fails: Claude
+  Code ignores frontmatter keys it does not recognise, so an unchecked typo would fail nowhere and
+  leave the pin silently unapplied. Integer efforts are accepted but must be positive with no
+  leading zeros; the harness's upper bound could not be resolved from the shipped binary, so none
+  is imposed.
+
 ## [0.2.2] - 2026-07-30
 
 ### Added
@@ -117,6 +149,7 @@ Findings from the first manual test run:
   entry points, the `review-go`, `review-bash`, `review-vue-ts` and `review-php` language skills, the
   shared rubric, procedure and agent-prompt references, and `review-tools.sh`.
 
+[0.3.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.1.4...v0.2.0
