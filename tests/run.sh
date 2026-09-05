@@ -203,7 +203,8 @@ if have gitleaks; then
   expect_flagged "gitleaks still catches a planted credential" gitleaks 1 \
     gitleaks detect --no-banner --redact --no-git
   rm -f "$probe"
-  trap - EXIT
+  # The EXIT trap is deliberately left armed. Clearing it with `trap - EXIT` would disarm any trap a
+  # future block sets earlier in this file, and re-removing an already-removed file costs nothing.
 else
   skip "gitleaks allowlist is not over-broad" "gitleaks not installed"
 fi
