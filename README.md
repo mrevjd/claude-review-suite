@@ -25,7 +25,7 @@ Optionally install the analysers the skills probe for (see [Toolchain](#toolchai
 | Skill | Triggers on | Carries |
 |---|---|---|
 | `code-review` | "review this", "look over this PR", "before I merge", "any bugs in this" | General checklist `GEN-01`…`GEN-07`; detects languages and delegates |
-| `security-review` | "security review", "audit this", "check for vulns", "is this exploitable" | Threat checklist `SEC-01`…`SEC-07`; `semgrep`, `gitleaks`, `trivy` |
+| `security-review` | "security review", "audit this", "check for vulns", "is this exploitable" | Threat checklist `SEC-01`…`SEC-07`; `semgrep`, `gitleaks`, `trivy`, `snyk` |
 | `review-go` | `.go` files, "review this Go service" | `GO-01`…`GO-07`; `go vet`, `staticcheck`, `gosec`, `govulncheck`, `errcheck` |
 | `review-bash` | `.sh`/`.bash` files, a shell shebang, "review this script" | `SH-01`…`SH-07`; `shellcheck`, `shfmt` |
 | `review-vue-ts` | `.vue`/`.ts`/`.tsx` files, "review this component" | `VT-01`…`VT-07`; `tsc --noEmit`, `eslint`, `bun audit`, `knip` |
@@ -75,6 +75,7 @@ every skill degrades to its checklist when a tool is absent.
 ./review-tools.sh probe      # capability report: status, scope, version   (default)
 ./review-tools.sh install    # install everything missing
 ./review-tools.sh tsv        # same probe, tab-separated, for a skill to consume
+./review-tools.sh snyk       # run the snyk scans alone: 0 clean, 1 findings, 2 neither ran
 ```
 
 `probe` prints a table and exits with a count of what is missing:
@@ -83,9 +84,23 @@ every skill degrades to its checklist when a tool is absent.
 TOOL           STATUS   SCOPE   VERSION
 staticcheck    PRESENT  global  staticcheck 2026.1 (v0.7.0)
 gitleaks       PRESENT  global  gitleaks version 8.30.1
+snyk           NOAUTH   global  1.1307.0
 ...
-0 of 21 absent.
+0 of 22 absent, 1 present but unauthenticated.  Then: snyk auth
 ```
+
+`NOAUTH` exists for one tool. Everywhere else a binary on `PATH` is a capability; `snyk` also needs
+an authenticated session, and an unauthenticated one fails with the same non-zero exit a real
+finding uses. Reporting it `PRESENT` when it cannot run would be the "looks complete, is not" result
+this suite exists to refuse, so the probe asks both questions and counts the two states separately:
+installing a binary will not authenticate it. The auth check is `snyk whoami`, which answers with a
+username, rather than `snyk config get api`, which answers by printing the token.
+
+`snyk` runs `snyk test` (dependency graph only) and `snyk code test` (**uploads source to Snyk**).
+Each scan reports RAN or SKIP with a reason, and the exit code separates "found nothing" from "could
+not scan": a run where neither scan executed exits 2, never 0. Snyk Code is separately licensed, so
+an account that authenticates can still be refused the SAST scan with `SNYK-CODE-0005`; that is a
+SKIP with its own reason, not a crash and not a clean pass.
 
 **Resolution order** is global first, then project-local (`node_modules/.bin`, `vendor/bin`), so a
 globally installed `eslint` wins over a vendored one. Set `REVIEW_TOOL_PREFER=local` to reverse that,
@@ -174,7 +189,7 @@ references/         rubric.md (severity, confidence, finding format)
                     agent-prompt.md (block template and fill rules)
 skills/             one directory per skill, each a single SKILL.md
 tests/              validate.py, run.sh, fixtures/, README.md
-review-tools.sh     probe / install / tsv for the tools the skills use
+review-tools.sh     probe / install / tsv / snyk for the tools the skills use
 nvd-enrich.sh       CVE IDs on stdin, one enriched TSV row out; see NVD enrichment above
 ```
 

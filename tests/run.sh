@@ -74,6 +74,12 @@ echo
 echo "=== validator frontmatter branches ==="
 python3 tests/frontmatter-test.py || failed=1
 
+# Same argument for the snyk probe rules: snyk is the one tool here that can be installed and still
+# unusable, so the check that says so has to be watched rejecting each way that discipline is lost.
+echo
+echo "=== validator snyk probe branches ==="
+python3 tests/snyk-probe-test.py || failed=1
+
 shopt -s nullglob
 go_fixtures=(tests/fixtures/go/*.go)
 sh_all=(tests/fixtures/bash/*.sh)
