@@ -1,6 +1,8 @@
 ---
 name: review-bash
 description: Use when reviewing or auditing shell scripts - .sh or .bash files, a file with a bash or sh shebang, "review this script", "is this deploy script safe", "audit this cron job" - covering unquoted expansions and word splitting, missing set -euo pipefail, eval, unsafe temp file creation, PATH assumptions, unvalidated positional parameters, and command substitution in arithmetic contexts.
+model: opus
+effort: xhigh
 ---
 
 # Review Bash

@@ -12,6 +12,19 @@ SEVERITIES = ["Critical", "High", "Medium", "Low"]
 CONFIDENCES = ["Confirmed", "Likely", "Speculative"]
 STATUSES = ["FIXED", "SKIPPED-STALE", "SKIPPED-DISAGREE"]
 
+# Skill frontmatter. `name` and `description` are required; `model` and `effort` are optional pins
+# that keep a review's rigour a property of the skill rather than of whatever model the session
+# happened to be on. Nothing else is allowed: Claude Code ignores keys it does not know, so a typo
+# fails nowhere and the pin silently does not apply.
+SKILL_FM_REQUIRED = {"name", "description"}
+SKILL_FM_OPTIONAL = {"model", "effort"}
+SKILL_MODELS = ["opus", "sonnet", "haiku", "fable", "inherit"]
+SKILL_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# Models the harness refuses to apply to a skill while auto mode is on, keeping the session model
+# and logging a warning nobody reads. Pinning one is not an error -- it works outside auto mode --
+# but it is worth saying out loud, because the failure is silent exactly where this suite is used.
+SKILL_MODELS_IGNORED_IN_AUTO_MODE = ["haiku"]
+
 failures = []
 warnings = []
 
@@ -280,8 +293,24 @@ def check_skill_frontmatter():
             fail(f"{rel}: no YAML frontmatter")
             continue
         keys = {k for k in fm if k != "__raw__"}
-        if keys != {"name", "description"}:
-            fail(f"{rel}: frontmatter keys must be exactly name+description, got {sorted(keys)}")
+        missing = SKILL_FM_REQUIRED - keys
+        unknown = keys - SKILL_FM_REQUIRED - SKILL_FM_OPTIONAL
+        if missing:
+            fail(f"{rel}: frontmatter is missing required key(s) {sorted(missing)}")
+        if unknown:
+            allowed = sorted(SKILL_FM_REQUIRED | SKILL_FM_OPTIONAL)
+            fail(f"{rel}: frontmatter has unknown key(s) {sorted(unknown)}, allowed are {allowed}")
+        model = fm.get("model")
+        if model is not None:
+            if model not in SKILL_MODELS:
+                fail(f"{rel}: model {model!r} is not one of {SKILL_MODELS}")
+            elif model in SKILL_MODELS_IGNORED_IN_AUTO_MODE:
+                warn(f"{rel}: model {model!r} is ignored while auto mode is on -- the session "
+                     f"model is kept instead, and only a warning is logged")
+        effort = fm.get("effort")
+        # Claude Code also accepts a bare integer here, so a digit string is valid, not a typo.
+        if effort is not None and effort not in SKILL_EFFORTS and not effort.isdigit():
+            fail(f"{rel}: effort {effort!r} is not one of {SKILL_EFFORTS} or an integer")
         if len(fm["__raw__"]) > 1024:
             fail(f"{rel}: frontmatter is {len(fm['__raw__'])} chars, limit 1024")
         if fm.get("name") != name:

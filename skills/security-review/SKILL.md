@@ -1,6 +1,8 @@
 ---
 name: security-review
 description: Use when the user asks whether code is safe or wants it audited for security - "security review", "audit this", "check for vulns", "is this exploitable", "any injection risk here", "threat model this endpoint" - covering authentication, authorisation, injection, secret handling, crypto, deserialisation, SSRF, and sensitive data exposure.
+model: opus
+effort: xhigh
 ---
 
 # Security Review

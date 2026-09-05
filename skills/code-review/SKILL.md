@@ -1,6 +1,8 @@
 ---
 name: code-review
 description: Use when the user asks for a review of code they have written or changed - "review this", "look over this PR", "before I merge", "any bugs in this", "is this ready to ship", "give this a once-over" - covering correctness, error handling, resource lifetime, API contracts, maintainability, and missing test coverage.
+model: opus
+effort: xhigh
 ---
 
 # Code Review

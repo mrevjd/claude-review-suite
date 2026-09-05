@@ -1,6 +1,8 @@
 ---
 name: review-go
 description: Use when reviewing or auditing Go code - .go files, a go.mod module, "review this Go service", "check this handler before I merge", "audit this package" - covering nil dereference after an error, unchecked type assertions, goroutine and context leaks, SQL built by string concatenation, defer inside loops, ignored errors, and data races on shared state.
+model: opus
+effort: xhigh
 ---
 
 # Review Go
