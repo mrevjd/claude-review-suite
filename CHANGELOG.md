@@ -7,6 +7,34 @@ tag. Entries before 0.2.0 are drawn from those tag messages.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-05
+
+### Fixed
+
+- `.gitleaksignore` is replaced by `.gitleaks.toml`. The old file listed two fixture paths, but it
+  matches *fingerprints* (`commit:path:rule:line`) and never paths, so gitleaks rejected both entries
+  as invalid on every run and suppressed nothing. `gitleaks detect` had been exiting 1 on this
+  repository as a result. Emptying the file produced byte-identical output, which is how it was shown
+  to be dead rather than merely suspected.
+- The `TESTKEY-` placeholder in `tests/nvd-test.sh` and the design doc that introduced it is now
+  allowlisted by content rather than by path, so the exemption travels with the literal instead of
+  blessing whole files. The rule that a hit outside `tests/fixtures/` is real and must be rotated is
+  kept, with this as its one audited exception.
+
+### Added
+
+- Two gitleaks gates in `tests/run.sh`, one per direction: the repository must be quiet, and a
+  credential planted outside the fixtures tree must still be caught. An allowlist is one widened
+  pattern away from a scanner that reports nothing and looks clean doing it, which is the failure
+  this suite exists to prevent. Mutation testing confirms the two are complementary: widening either
+  allowlist trips only the second gate, deleting the config trips only the first.
+
+### Note
+
+- The fixtures allowlist blesses that whole tree, so a genuine credential committed under
+  `tests/fixtures/` would not be reported. Accepted because every file there is fabricated input by
+  construction, and stated in `.gitleaks.toml` rather than left to be discovered.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added
@@ -149,6 +177,7 @@ Findings from the first manual test run:
   entry points, the `review-go`, `review-bash`, `review-vue-ts` and `review-php` language skills, the
   shared rubric, procedure and agent-prompt references, and `review-tools.sh`.
 
+[0.3.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.0...v0.2.1
