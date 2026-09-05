@@ -4,6 +4,9 @@
 #   ./review-tools.sh probe   [dir]   capability report (default)
 #   ./review-tools.sh install [dir]   install anything missing, globally
 #   ./review-tools.sh tsv     [dir]   machine-readable probe, for the skills
+#   ./review-tools.sh snyk    [dir]   run the snyk scans alone, without a review pass
+#                                     exit 0 both scans clean, 1 findings, 2 neither scan ran,
+#                                            3 incomplete: what ran was clean, a scan was skipped
 #
 # Resolution: global first, project-local fallback.
 #   REVIEW_TOOL_PREFER=local  reverses it
@@ -23,7 +26,7 @@ TOOLS=(
     shellcheck shfmt
     bun tsc eslint knip
     php composer phpstan
-    semgrep gitleaks trivy
+    semgrep gitleaks trivy snyk
     git curl jq yq
 )
 
@@ -49,6 +52,22 @@ pkg_install() {
     elif have apk;     then $SUDO apk add "$@"
     else warn "no known package manager; install manually: $*"; return 1
     fi
+}
+
+# Every other tool here is a capability the moment it is on PATH. snyk is not: it needs an
+# authenticated session, and an unauthenticated one fails with the same non-zero exit a real finding
+# uses. Reporting it PRESENT when it cannot run is the "looks complete, is not" result this suite
+# exists to refuse, so the probe asks the second question too.
+#
+# `whoami` answers in a username. `config get api` would answer the same question by printing the
+# token on stdout, which is a credential leak performed by the tool that inspects for credential
+# leaks; do not swap it in.
+auth_ok() {
+    local bin="$1" path="$2"
+    case "$bin" in
+        snyk) "$path" whoami --experimental >/dev/null 2>&1 ;;
+        *) return 0 ;;
+    esac
 }
 
 # ------------------------------------------------------------- resolution ---
@@ -103,6 +122,8 @@ probe_one() {
     fi
     if [ -z "$path" ]; then
         printf 'ABSENT\t-\t-\t-'
+    elif ! auth_ok "$bin" "$path"; then
+        printf 'NOAUTH\t%s\t%s\t%s' "$scope" "$path" "$(version_of "$path")"
     else
         printf 'PRESENT\t%s\t%s\t%s' "$scope" "$path" "$(version_of "$path")"
     fi
@@ -114,7 +135,7 @@ cmd_tsv() {
 }
 
 cmd_probe() {
-    local t line status scope version missing=0
+    local t line status scope version absent=0 noauth=0
     printf '%-14s %-8s %-7s %s\n' TOOL STATUS SCOPE VERSION
     printf '%-14s %-8s %-7s %s\n' -------------- -------- ------- -------
     for t in "${TOOLS[@]}"; do
@@ -123,10 +144,18 @@ cmd_probe() {
         scope="$(printf  '%s' "$line" | cut -f2)"
         version="$(printf '%s' "$line" | cut -f4)"
         printf '%-14s %-8s %-7s %s\n' "$t" "$status" "$scope" "$version"
-        [ "$status" = ABSENT ] && missing=$((missing + 1))
+        case "$status" in
+            ABSENT) absent=$((absent + 1)) ;;
+            NOAUTH) noauth=$((noauth + 1)) ;;
+        esac
     done
-    printf '\n%d of %d absent.' "$missing" "${#TOOLS[@]}"
-    [ "$missing" -gt 0 ] && printf '  Run: %s install' "$0"
+    # Two counts, two remedies: installing a binary will not authenticate it, and one summary line
+    # covering both would send the reader to the wrong fix.
+    printf '\n%d of %d absent' "$absent" "${#TOOLS[@]}"
+    [ "$noauth" -gt 0 ] && printf ', %d present but unauthenticated' "$noauth"
+    printf '.'
+    [ "$absent" -gt 0 ] && printf '  Run: %s install' "$0"
+    [ "$noauth" -gt 0 ] && printf '  Then: snyk auth'
     printf '\n'
 }
 
@@ -263,6 +292,13 @@ cmd_install() {
         pipx install semgrep
     fi
 
+    # snyk ships one static binary per arch. Asset names verified against the live v1.1307.0
+    # release on 2026-09-05. Authentication is deliberately not attempted: `snyk auth` opens a
+    # browser and writes a credential to the user's home directory, which is their decision.
+    local snyk_asset="snyk-linux$"
+    [ "$ARCH_GO" = arm64 ] && snyk_asset="snyk-linux-arm64$"
+    gh_install snyk snyk/cli "$snyk_asset" || true
+
     if have trivy; then skip trivy; else
         # Unpinned deliberately: upstream prunes old releases, so pins rot.
         say "installing trivy from upstream script"
@@ -285,6 +321,89 @@ cmd_install() {
 
     printf '\n'; say "install pass complete, re-probing:"; printf '\n'
     cmd_probe
+
+    # A NOAUTH row is not something this script can clear, and saying so beats leaving the reader to
+    # re-run install and watch nothing change.
+    if have snyk && ! auth_ok snyk "$(resolve_global snyk)"; then
+        printf '\n'; warn "snyk is installed but not authenticated. Run 'snyk auth' when you want it"
+        warn "to run: it opens a browser, so this script will not do it for you."
+    fi
+}
+
+# ------------------------------------------------------------------- snyk ---
+# The two snyk scans on their own, for when the scan is wanted without paying for a full review
+# pass. This reports: it installs nothing, authenticates nothing, and fixes nothing.
+#
+# snyk_scan reads SNYK_BIN and updates `ran` and `found`, both declared by its caller. Exit codes are
+# verified against CLI 1.1307.0: 0 clean, 1 findings, 3 no supported project, 2 everything that went
+# wrong. 2 has to be read rather than counted, because a licensing refusal arrives with the same
+# code a genuine crash does, and those are opposite claims.
+snyk_scan() {
+    local label="$1"
+    shift
+    local out rc first
+
+    printf '\n--- %s ---\n' "$label"
+    out="$("$SNYK_BIN" "$@" 2>&1)"
+    rc=$?
+    first="$(printf '%s\n' "$out" | grep -vE '^[[:space:]]*$' | head -n1 | cut -c1-100)"
+
+    case "$rc" in
+        0) printf '%s\n' "$out"; say "$label: RAN, nothing found"; ran=$((ran + 1)) ;;
+        1) printf '%s\n' "$out"; say "$label: RAN, findings above"; ran=$((ran + 1)); found=1 ;;
+        3) warn "$label: SKIP, no supported project in scope (exit 3)" ;;
+        *)
+            if printf '%s' "$out" | grep -q 'SNYK-CODE-0005'; then
+                warn "$label: SKIP, Snyk Code is not enabled for this organisation (exit $rc)."
+                warn "  Not a crash and not a clean scan. Enable Snyk Code in the org's settings."
+            else
+                warn "$label: SKIP, exit $rc: $first"
+            fi
+            ;;
+    esac
+}
+
+cmd_snyk() {
+    local line status path ran=0 found=0
+
+    line="$(probe_one snyk)"
+    status="$(printf '%s' "$line" | cut -f1)"
+    path="$(printf '%s' "$line" | cut -f3)"
+
+    case "$status" in
+        ABSENT)
+            warn "snyk not installed: both scans SKIP. Install it with: bun add -g snyk"
+            return 2
+            ;;
+        NOAUTH)
+            warn "snyk installed but not authenticated: both scans SKIP. Authenticate with: snyk auth"
+            return 2
+            ;;
+    esac
+
+    SNYK_BIN="$path"
+    say "snyk $(version_of "$path") ($path), scanning $ROOT"
+    say "'snyk test' sends the dependency graph only; 'snyk code test' uploads source to Snyk"
+
+    snyk_scan "snyk test (dependencies)" test --severity-threshold=low "$ROOT"
+    snyk_scan "snyk code test (source)" code test --severity-threshold=low "$ROOT"
+
+    printf '\n'
+    if [ "$ran" -eq 0 ]; then
+        warn "neither scan ran. This is not a clean result."
+        return 2
+    fi
+    [ "$found" -eq 1 ] && return 1
+    if [ "$ran" -lt 2 ]; then
+        # Exit 0 here would be indistinguishable from a complete clean scan, and on an account
+        # without Snyk Code enabled this is the usual outcome rather than an edge case. The SKIP
+        # line above says so in words; a caller gating on the exit code cannot read words, which is
+        # the whole reason this suite refuses to let a check that did not run look like a pass.
+        warn "$ran of 2 scans ran and found nothing. Incomplete, not clean: see the SKIP above."
+        return 3
+    fi
+    say "both scans ran, nothing found."
+    return 0
 }
 
 # --------------------------------------------------------------- dispatch ---
@@ -295,6 +414,7 @@ ROOT="${2:-.}"
 case "$CMD" in
     probe)   cmd_probe ;;
     tsv)     cmd_tsv ;;
+    snyk)    cmd_snyk ;;
     install) cmd_install ;;
     -h|--help|help) usage ;;
     *) warn "unknown command: $CMD"; usage >&2; exit 2 ;;

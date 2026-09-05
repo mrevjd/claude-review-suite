@@ -34,7 +34,27 @@ it is easy to erode by accident:
 
 `review-tools.sh install` is a suggestion to surface to the user, never something to run for them.
 This is machine-enforced: `check_installer_is_suggested_not_run` fails any skill that names
-`review-tools.sh install` in a paragraph without a suggest-don't-run qualifier.
+`review-tools.sh install` in a paragraph without a suggest-don't-run qualifier. `snyk auth` is held
+to the same rule by `check_snyk_probe`, because it opens a browser and writes a credential to the
+user's home directory.
+
+## Installed is not the same as usable
+
+snyk is the one tool here that can be on `PATH` and still unable to run, and it fails in the way that
+matters most: `snyk test` exits non-zero on an authentication error exactly as it does on a real
+vulnerability, so reading the exit code alone turns "did not run" into either "clean" or "found
+something". `probe` therefore has a third status, `NOAUTH`, counted separately from `ABSENT` because
+installing a binary will not authenticate it.
+
+There is a fourth state below that. Snyk Code is separately licensed, so an authenticated account can
+still be refused the SAST scan with exit 2 and `SNYK-CODE-0005`, the same exit code a genuine crash
+uses. Read the error body, not the code. Each of these four states has its own `## Checks skipped`
+reason and they are never collapsed into one.
+
+The auth probe is `snyk whoami`. Not `snyk config get api`: that answers the same question by
+printing the token onto stdout and into the report, which is the SEC-04 finding this suite raises on
+other people's code, committed by the review itself. `check_snyk_probe` bans it from the probe block
+while deliberately allowing the prose to name it, so the reason it is wrong survives the next edit.
 
 ## Severity comes from reachability, not from CVSS
 
@@ -48,7 +68,7 @@ nicely.
 
 ## Contracts the validator enforces
 
-Changing a skill or fixture means satisfying `tests/validate.py`. It has **12 check groups**, not
+Changing a skill or fixture means satisfying `tests/validate.py`. It has **13 check groups**, not
 the five spelled out below. Read the group that failed before guessing at the rule.
 
 - **Skill frontmatter** (`check_skill_frontmatter`): exactly `name`, `description`, `model` and
@@ -76,12 +96,12 @@ the five spelled out below. Read the group that failed before guessing at the ru
 - **Manifests** (`check_manifests`): `.claude-plugin/plugin.json` and `marketplace.json` must agree
   on name and version.
 
-The other seven are worth knowing before you edit a skill, since each one fails on something easy
+The other eight are worth knowing before you edit a skill, since each one fails on something easy
 to do by accident: `check_changelog`, `check_references`, `check_agent_prompt_parses`,
 `check_tool_probes` (every tool assigned to a skill must be named in its `SKILL.md`, and the first
 one needs a literal `command -v <binary>` line), `check_trigger_distinctness` (entry points match
 intent, language skills match language + intent, and descriptions must not contend),
-`check_installer_is_suggested_not_run`, and `check_nvd_enrichment`.
+`check_installer_is_suggested_not_run`, `check_snyk_probe`, and `check_nvd_enrichment`.
 
 ## Checklist IDs
 

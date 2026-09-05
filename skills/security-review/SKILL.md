@@ -57,6 +57,8 @@ Follow `../../references/procedure.md` for scoping, probing and error handling. 
 command -v semgrep
 command -v gitleaks
 command -v trivy
+command -v snyk
+snyk whoami --experimental   # exit 0 = authenticated; prints a username, never the token
 ../../nvd-enrich.sh --check
 ```
 
@@ -65,13 +67,72 @@ command -v trivy
 | `semgrep` | `semgrep --config auto --error` | `pipx install semgrep` (note that `--config auto` fetches rules, so it needs network access) |
 | `gitleaks` | `gitleaks detect --no-banner --redact` | `brew install gitleaks` / download a release binary |
 | `trivy` | `trivy fs --scanners vuln,secret .` | `brew install trivy` / `apt install trivy` |
+| `snyk` (SCA) | `snyk test --severity-threshold=low` | `bun add -g snyk`, then `snyk auth`. Both are the user's call: `auth` opens a browser and writes a credential to their home directory |
+| `snyk` (SAST) | `snyk code test --severity-threshold=low` | as above, and read the egress note before running it on a repository that is not yours |
 | `nvd-enrich.sh` | `<cve-ids> \| ../../nvd-enrich.sh` | ships with the plugin, so it is always present. Needs `curl` and `jq` and network access; without an API key it runs at a reduced lookup cap |
 
 Several missing at once? The suite ships `review-tools.sh`, which probes and installs the whole
 toolchain in one pass. **Name it in `## Checks skipped` and leave running it to the user**: a review
-reports, it does not install.
+reports, it does not install. It also has a `snyk` subcommand that runs both scans on their own,
+for when the scan is wanted without a full review pass; that one is the user's to run too.
 
-The three scanners exit non-zero when they find something: that is a result, not a crash.
+### snyk has four states, not two
+
+Every other tool here is present or absent. snyk can be present, authenticated, and still unable to
+run the scan you asked for, and those middle states are the ones that mislead.
+
+**Installed but not authenticated is a skipped check**, never a pass and never a finding.
+`snyk test` exits non-zero on an auth failure exactly as it does on a real vulnerability, so reading
+the exit code alone misfiles the same run in either direction: "clean", or "found something", when
+the truth is "did not run".
+
+Probe it with `snyk whoami`, which answers in a username. Not with `snyk config get api`, which
+answers by printing the token onto stdout and from there into this report: that is the SEC-04
+finding this skill raises on other people's code, committed by the review itself.
+
+Four distinct rows, never collapsed into one:
+
+| State | How it shows | `## Checks skipped` reason |
+|---|---|---|
+| binary absent | `command -v` fails | `snyk not installed` |
+| present, unauthenticated | `snyk whoami` exits non-zero | `snyk installed but not authenticated` |
+| authenticated, not entitled | exit 2 with `SNYK-CODE-0005` / HTTP 403 | `Snyk Code not enabled for this organisation` |
+| authenticated, command failed | any other exit 2 | the exit code and the first line of the error, per `../../references/procedure.md` |
+
+The entitlement row is not hypothetical and it is not a crash. Snyk Code is a separately licensed
+product, so an account that authenticates perfectly can still be refused the SAST scan, and it is
+refused with the same exit 2 a real failure uses. Read the error body, not the exit code: `403` with
+`SNYK-CODE-0005` means the check did not run and nobody can fix it from the command line. Reporting
+that as a crash overstates it; reporting it as a clean SAST pass is the lie this suite is built to
+refuse.
+
+Note what this state implies about the egress note below: where Snyk Code is not enabled, no source
+leaves the machine, because the scan is refused before it uploads.
+
+**`snyk code test` uploads source code to Snyk.** `snyk test` does not; it sends the dependency
+graph built from manifests and lockfiles. Snyk's published policy is that code is analysed once and
+cached only for the cloud provider's storage minimum (24 hours on the US/GCP tenant, 24 to 48 hours
+on AWS EU/AU and private tenants), after which the code is deleted and only finding locations, issue
+IDs and explanations persist, and that customer code is not used for engine training. Say this out
+loud in the report when the review is of a repository the user does not own: the decision to send it
+is theirs, and it is not reversible once made. `.snyk` and `--exclude` narrow what goes.
+
+**Deduplicate against the scanners that already ran.** `snyk test` covers the ground
+`trivy --scanners vuln` covers, and `snyk code test` overlaps `semgrep`. Two scanners reaching the
+same defect is one finding, keyed by package plus advisory for SCA and by file, line and claim for
+SAST; the corroboration goes on the finding as evidence, not into a second row. Independent
+agreement is worth recording precisely because it is the strongest signal in the report, and it
+stops being that if it is padded out into two.
+
+snyk labels its own findings High/Medium/Low. Same rule as CVSS below: evidence, never severity.
+Snyk leads with `SNYK-*` advisory IDs, so only the subset that also carries a CVE enriches through
+`nvd-enrich.sh`; the rest are reported on the advisory ID alone.
+
+The four scanners exit non-zero when they find something: that is a result, not a crash. snyk
+separates the cases by code, verified against CLI 1.1307.0: **1** is findings, **3** is no supported
+project in scope (a SKIP reading `no dependency manifest in scope`, not a clean bill), and **2** is
+everything that went wrong, entitlement included, which is why 2 has to be read rather than
+counted.
 `nvd-enrich.sh` deliberately has no found-problems exit code, so non-zero from it always means the
 enrichment step was skipped. A `semgrep` run
 that cannot fetch its ruleset, a `gitleaks` run outside a git repository, or a `trivy` database

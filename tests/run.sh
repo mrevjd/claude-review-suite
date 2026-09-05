@@ -74,6 +74,12 @@ echo
 echo "=== validator frontmatter branches ==="
 python3 tests/frontmatter-test.py || failed=1
 
+# Same argument for the snyk probe rules: snyk is the one tool here that can be installed and still
+# unusable, so the check that says so has to be watched rejecting each way that discipline is lost.
+echo
+echo "=== validator snyk probe branches ==="
+python3 tests/snyk-probe-test.py || failed=1
+
 shopt -s nullglob
 go_fixtures=(tests/fixtures/go/*.go)
 sh_all=(tests/fixtures/bash/*.sh)
@@ -152,6 +158,12 @@ gate "differential: Go fixtures still diverge" go 1 \
 
 gate "nvd-enrich.sh behaves" bash 1 \
   bash tests/nvd-test.sh
+
+# Shims a fake snyk onto PATH, so this runs everywhere and never reaches Snyk. It pins the exit-code
+# contract of `review-tools.sh snyk`, where a partial run once exited 0: the output said a scan had
+# been skipped and the exit code said clean, and the exit code is the half a caller reads.
+gate "review-tools.sh snyk exit-code contract" bash 1 \
+  bash tests/snyk-runner-test.sh
 
 # node 22+ strips types, so --check is a real parse gate for TypeScript. It cannot parse .vue.
 # shellcheck disable=SC2016

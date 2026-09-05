@@ -35,6 +35,15 @@ EFFORT_INT_RE = re.compile(r"[1-9][0-9]*")
 # rather than trusting the list: when the alias moves, this warns on a pin that now works.
 SKILL_MODELS_IGNORED_IN_AUTO_MODE = ["haiku"]
 
+# Side-effecting commands a skill may name but must never tell itself to run. One paragraph must
+# carry both the command and one of these qualifiers. Shared by the two checks that police it, since
+# a second copy of this vocabulary would drift away from the first.
+SUGGEST_QUALIFIER = re.compile(
+    r"leave running it|leave it to the user|suggest it|never run it|do not run|does not install|"
+    r"user's decision|user's call|the user decides",
+    re.I,
+)
+
 failures = []
 warnings = []
 
@@ -250,7 +259,7 @@ TOOLS = {
     "review-bash": ["shellcheck", "shfmt"],
     "review-vue-ts": ["tsc --noEmit", "eslint", "bun audit", "knip"],
     "review-php": ["php -l", "phpstan", "composer audit"],
-    "security-review": ["semgrep", "gitleaks", "trivy"],
+    "security-review": ["semgrep", "gitleaks", "trivy", "snyk"],
 }
 
 # A skill *declares* only the IDs in its own prefix. Where a skill cites another skill's ID -- as
@@ -612,16 +621,96 @@ def check_installer_is_suggested_not_run():
             continue
         # The distinction that matters: suggesting the installer is the point, running it is not.
         # Scoped by paragraph, because the qualifier routinely lands on a following wrapped line.
-        qualifier = re.compile(
-            r"leave running it|suggest it|never run it|do not run|does not install|"
-            r"user's decision|user's call|the user decides",
-            re.I,
-        )
         for para in re.split(r"\n\s*\n", text):
-            if re.search(r"review-tools\.sh\s+install", para) and not qualifier.search(para):
+            if re.search(r"review-tools\.sh\s+install", para) and not SUGGEST_QUALIFIER.search(para):
                 first = para.strip().splitlines()[0]
                 fail(f"{rel}: names 'review-tools.sh install' without the suggest-don't-run "
                      f"qualifier in the same paragraph: {first[:70]!r}")
+
+
+def check_snyk_probe():
+    """snyk is the only tool in the suite that can be installed and still unusable, because it needs
+    an authenticated session. Present-but-unauthenticated is the dangerous state, and it is dangerous
+    for this suite's specific reason: `snyk test` exits non-zero on an auth failure exactly as it
+    does on a real finding, so the misread that elsewhere turns "did not run" into "clean" here turns
+    it into "found problems" as well. Both directions are wrong and neither announces itself.
+
+    Three things have to hold. The probe asks both questions, not just the PATH one. It asks the auth
+    question without printing the token, because a review that writes a live credential into its own
+    report is the SEC-04 finding this suite raises on other people's code. And the unauthenticated
+    case is written down as a skipped check, which is the discipline the whole repo exists to
+    enforce: an absent capability is a SKIP, never a pass."""
+    rel = "skills/security-review/SKILL.md"
+    text = read(rel)
+    if text is None:
+        return
+
+    # Scoped to the section rather than the file: every assertion below is about what the agent
+    # reads while it is deciding which scanners it may run, and a mention anywhere else does not
+    # reach it in time.
+    probe = section(text, "Capability probe")
+    if probe is None:
+        fail(f"{rel}: missing '## Capability probe' section")
+        return
+
+    # Scoped to the section's fenced blocks, not its prose. The section also says "probe it with
+    # `snyk whoami`" in a sentence, and an assertion that sentence could satisfy would pass on a
+    # probe block with the line deleted. That is a check which cannot fail, and one of those is
+    # worse than no check at all, because a green run then means nothing.
+    blocks = "\n".join(re.findall(r"```(?:bash|sh)?\n(.*?)```", probe, re.S))
+
+    if "command -v snyk" not in blocks:
+        fail(f"{rel}: '## Capability probe' has no 'command -v snyk' line in its probe block")
+
+    if "snyk whoami" not in blocks:
+        fail(f"{rel}: '## Capability probe' never runs an auth check, so an unauthenticated snyk "
+             f"reads as a usable one")
+
+    # Banned as a *probe*, not as a word: the prose stays free to say why it is the wrong command,
+    # which is the note that stops a later editor "simplifying" the auth check back into it. What
+    # must not happen is the review running it, because it answers the auth question by printing the
+    # token on stdout -- into the transcript of a review whose own SEC-04 row is about credentials
+    # landing in exactly such places.
+    if "snyk config get api" in blocks:
+        fail(f"{rel}: '## Capability probe' runs 'snyk config get api', which prints the token; "
+             f"use 'snyk whoami', which prints a username")
+
+    # One line has to carry both halves. Requiring the two words anywhere in the section would pass
+    # on a section that happens to say "authenticated" in one place and "skipped" in another, which
+    # is exactly the accidental pass this file is meant not to hand out.
+    if not any(re.search(r"authenticat", line, re.I) and re.search(r"skip", line, re.I)
+               for line in probe.splitlines()):
+        fail(f"{rel}: '## Capability probe' never says on one line that an unauthenticated snyk is "
+             f"a skipped check, leaving the installed-but-unusable state with no documented outcome")
+
+    # `snyk auth` opens a browser and writes a credential to the user's home directory. Same rule as
+    # the installer: name it, never run it.
+    for para in re.split(r"\n\s*\n", text):
+        if re.search(r"\bsnyk auth\b", para) and not SUGGEST_QUALIFIER.search(para):
+            first = para.strip().splitlines()[0]
+            fail(f"{rel}: names 'snyk auth' without the suggest-don't-run qualifier in the same "
+                 f"paragraph: {first[:70]!r}")
+
+    script = read("review-tools.sh")
+    if script is None:
+        return
+
+    tools_block = re.search(r"^TOOLS=\((.*?)\)", script, re.M | re.S)
+    if tools_block is None:
+        fail("review-tools.sh: no 'TOOLS=( ... )' list found")
+    elif not re.search(r"\bsnyk\b", tools_block.group(1)):
+        fail("review-tools.sh: snyk is absent from TOOLS, so './review-tools.sh probe' reports a "
+             "toolchain complete while the tool the security pass wants is missing")
+
+    # The standalone runner. Without it the only way to reach snyk is a full review pass, which is
+    # the wrong price for "just scan this".
+    #
+    # Matched together with the handler it calls, not on the case label alone: `auth_ok` has a
+    # `snyk)` arm of its own, so a bare label match was satisfied by that and stayed green with the
+    # dispatch entry deleted. tests/snyk-probe-test.py is what caught it.
+    if not re.search(r"^\s*snyk\)\s*cmd_snyk", script, re.M):
+        fail("review-tools.sh: no 'snyk)' dispatch case calling cmd_snyk, so the scans cannot be "
+             "run on their own")
 
 
 def check_nvd_enrichment():
@@ -692,7 +781,7 @@ CHECKS = [check_manifests, check_changelog, check_references,
           check_agent_prompt_parses, check_skill_frontmatter, check_tool_probes,
           check_checklist_coverage, check_vuln_anchors, check_delegation,
           check_trigger_distinctness, check_installer_is_suggested_not_run,
-          check_nvd_enrichment]
+          check_snyk_probe, check_nvd_enrichment]
 
 
 def main():
