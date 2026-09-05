@@ -7,6 +7,47 @@ tag. Entries before 0.2.0 are drawn from those tag messages.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-05
+
+### Added
+
+- `snyk` joins the `security-review` toolchain: `snyk test` for dependencies and `snyk code test`
+  for source. Both run inside the threat pass, so a gate that already invokes `security-review`
+  picks them up with no change at the call site.
+- **`probe` has a third status, `NOAUTH`.** Every other tool here is a capability the moment it is
+  on `PATH`; snyk also needs an authenticated session, and an unauthenticated `snyk test` exits
+  non-zero with the same code a real vulnerability produces. Reading the exit code alone turns "did
+  not run" into either "clean" or "found something", both wrong and neither announcing itself.
+  `ABSENT` and `NOAUTH` are counted separately, because installing a binary will not authenticate
+  it.
+- A fourth state, documented and given its own skipped-check reason: Snyk Code is separately
+  licensed, so an authenticated account can still be refused the SAST scan with exit 2 and
+  `SNYK-CODE-0005`, which is the exit code a genuine crash also uses. The error body distinguishes
+  them; the exit code does not.
+- `./review-tools.sh snyk [dir]` runs the two scans on their own, for when the scan is wanted
+  without a full review pass. Each scan reports RAN or SKIP with a reason, and the exit code keeps
+  "found nothing" apart from "could not scan": 0 clean, 1 findings, 2 neither scan ran.
+- `check_snyk_probe`, the thirteenth check group, enforcing all of the above: the probe asks the
+  PATH question and the auth question, the unauthenticated case is written down as a skipped check,
+  `snyk auth` carries the same suggest-don't-run qualifier the installer does, and snyk is wired
+  into both `TOOLS` and the dispatch table.
+- `tests/snyk-probe-test.py`, run by `tests/run.sh`, watching each of those branches reject what it
+  claims to. It earned its place immediately: the dispatch-table assertion was matching `auth_ok`'s
+  own `snyk)` case arm, so it stayed green with the dispatch entry deleted.
+
+### Security
+
+- The auth probe is `snyk whoami`, which answers with a username, never `snyk config get api`, which
+  answers by printing the token onto stdout and from there into the report. That is the SEC-04
+  finding this suite raises on other people's code, committed by the review itself.
+  `check_snyk_probe` bans it from the probe block while allowing the prose to name it, so the reason
+  it is wrong survives the next edit.
+- `snyk code test` uploads source to Snyk. The skill states this at probe time, with Snyk's
+  published retention terms (analysed once, cached for the cloud provider's storage minimum: 24
+  hours on the US/GCP tenant, 24 to 48 hours on AWS EU/AU and private tenants; then deleted, leaving
+  only finding locations, issue IDs and explanations; not used for engine training), so the decision
+  to send a repository is made before the scan rather than discovered after it.
+
 ## [0.3.1] - 2026-09-05
 
 ### Fixed
@@ -177,6 +218,7 @@ Findings from the first manual test run:
   entry points, the `review-go`, `review-bash`, `review-vue-ts` and `review-php` language skills, the
   shared rubric, procedure and agent-prompt references, and `review-tools.sh`.
 
+[0.4.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.1...v0.2.2
