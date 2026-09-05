@@ -7,6 +7,26 @@ tag. Entries before 0.2.0 are drawn from those tag messages.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-05
+
+### Added
+
+- Optional `model` and `effort` frontmatter on every skill, and all six now pin `model: opus` with
+  `effort: xhigh`. A review's rigour was previously a property of whichever model the session
+  happened to be on: invoking the suite from a cheap session silently got a cheaper review, with
+  nothing in the report saying so. The pins make it a property of the skill instead.
+- `check_skill_frontmatter` warns when a skill pins a model Claude Code refuses to apply while auto
+  mode is on. Such a pin is discarded, the session model is kept, and the only trace is a
+  warning-level log line, so the failure mode is a review that looks pinned and is not. `haiku`
+  (`claude-haiku-4-5`) is the current member of that set.
+
+### Changed
+
+- Skill frontmatter keys are no longer required to be exactly `name` + `description`. `name` and
+  `description` stay required; `model` and `effort` are permitted and value-checked; anything else
+  still fails. Claude Code ignores frontmatter keys it does not recognise, so an unchecked typo
+  would fail nowhere and leave the pin silently unapplied.
+
 ## [0.2.2] - 2026-07-30
 
 ### Added
@@ -117,6 +137,7 @@ Findings from the first manual test run:
   entry points, the `review-go`, `review-bash`, `review-vue-ts` and `review-php` language skills, the
   shared rubric, procedure and agent-prompt references, and `review-tools.sh`.
 
+[0.3.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrevjd/claude-review-suite/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrevjd/claude-review-suite/compare/v0.1.4...v0.2.0
